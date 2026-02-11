@@ -1,0 +1,219 @@
+import yt_dlp
+import json
+import csv
+import os
+import argparse
+from pathlib import Path
+
+def search_skiing_videos(
+    target_total_videos=40,
+    output_json_path="ski_analysis_dataset.json",
+    output_csv_path="ski_analysis_dataset.csv",
+):
+    # 1. Configuration
+    # We target specific skiers and "technique-focused" keywords
+    skiers = [
+        "Lucas Braathen",
+        "Henrik Kristoffersen",
+    ]
+    
+    # Keywords that help find videos suitable for line analysis
+    # UPDATED: Focused strictly on SLALOM ONLY training and racing
+    search_modifiers = [
+        "Slalom training",
+        "SL training run",
+        "Slalom race run",
+        "Slalom World Cup",
+        "SL race",
+        "Slalom technique"
+    ]
+    
+    # NEW: Keywords to filter OUT non-skiing content
+    exclusion_keywords = [
+        "interview", "story", "documentary", "life of", 
+        "profile", "talk", "podcast", "behind the scenes", "vlog"
+    ]
+
+    videos_per_skier = target_total_videos // len(skiers)
+    
+    all_results = []
+
+    # 2. Setup yt-dlp options
+    # 'extract_flat': True means we grab metadata WITHOUT downloading video files (very fast)
+    ydl_opts = {
+        'quiet': True,
+        'extract_flat': True,
+        'force_generic_extractor': False,
+        'noplaylist': True,
+    }
+
+    print(f"🔍 Starting search for approx {target_total_videos} videos...")
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        for skier in skiers:
+            print(f"\n⛷️  Searching for: {skier}...")
+            
+            # We construct a specific search query for YouTube
+            # "ytsearch5" asks for the top 5 results for that specific query
+            # We loop through different modifiers to get a variety of angles
+            
+            for modifier in search_modifiers:
+                query = f"{skier} {modifier}"
+                print(f"   Querying: '{query}'")
+                
+                try:
+                    # ytsearchN:query syntax tells yt-dlp to search
+                    search_query = f"ytsearch3:{query}" 
+                    result = ydl.extract_info(search_query, download=False)
+
+                    if 'entries' in result:
+                        for video in result['entries']:
+                            # Filter out Shorts (usually less than 60s) if you want full runs
+                            # Note: 'duration' might be missing in flat extraction, so we check loosely
+                            title = video.get('title', 'No Title')
+                            url = video.get('url', '')
+                            
+                            # NEW: Filter out unwanted video types based on title
+                            if any(bad_word in title.lower() for bad_word in exclusion_keywords):
+                                print(f"   ❌ Skipped (Story/Interview): {title[:40]}...")
+                                continue
+
+                            # Deduplicate by URL
+                            if any(v['url'] == url for v in all_results):
+                                continue
+                                
+                            video_data = {
+                                'skier': skier,
+                                'title': title,
+                                'url': url,
+                                'search_term': modifier
+                            }
+                            all_results.append(video_data)
+                            print(f"   ✅ Found: {title[:50]}...")
+                
+                except Exception as e:
+                    print(f"   ⚠️ Error searching for {skier}: {e}")
+
+    # 3. Save Results
+    print(f"\n🎉 Search complete. Found {len(all_results)} videos.")
+    
+    # Save to JSON (easy for programs to read)
+    with open(output_json_path, 'w', encoding='utf-8') as f:
+        json.dump(all_results, f, indent=2, ensure_ascii=False)
+    
+    # Save to CSV (easy for you to open in Excel)
+    keys = all_results[0].keys() if all_results else []
+    with open(output_csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=keys)
+        writer.writeheader()
+        writer.writerows(all_results)
+
+    print(f"📁 Data saved to '{output_json_path}' and '{output_csv_path}'")
+
+
+def _load_dataset(dataset_path):
+    dataset_path = Path(dataset_path)
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Dataset not found: {dataset_path}")
+    if dataset_path.suffix.lower() == ".json":
+        return json.loads(dataset_path.read_text(encoding="utf-8"))
+    if dataset_path.suffix.lower() == ".csv":
+        with dataset_path.open(newline="", encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+    raise ValueError("Dataset must be .json or .csv")
+
+
+def download_videos(
+    dataset_path,
+    output_dir,
+    max_videos=None,
+    archive_path=None,
+    format_selector="bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+):
+    """
+    Download videos from a dataset generated by search_skiing_videos().
+
+    Args:
+        dataset_path: Path to .json or .csv dataset.
+        output_dir: Directory to save downloaded videos.
+        max_videos: Optional limit on number of videos to download.
+        archive_path: Optional path to yt-dlp download archive file.
+        format_selector: yt-dlp format selector string.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    records = _load_dataset(dataset_path)
+    if max_videos is not None:
+        records = records[: max_videos]
+
+    ydl_opts = {
+        "outtmpl": str(output_dir / "%(title).200B-%(id)s.%(ext)s"),
+        "format": format_selector,
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "restrictfilenames": True,
+        "ignoreerrors": True,
+        "no_warnings": True,
+        "quiet": False,
+    }
+    if archive_path:
+        ydl_opts["download_archive"] = str(archive_path)
+
+    log_path = output_dir / "download_log.jsonl"
+    print(f"⬇️  Downloading {len(records)} video(s) to: {output_dir}")
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl, log_path.open("a", encoding="utf-8") as log:
+        for idx, item in enumerate(records, start=1):
+            url = item.get("url")
+            title = item.get("title", "")
+            if not url:
+                log.write(json.dumps({"status": "skipped", "reason": "missing_url", "item": item}) + "\n")
+                continue
+
+            print(f"[{idx}/{len(records)}] {title[:70]}")
+            try:
+                ret = ydl.download([url])
+                status = "ok" if ret == 0 else "failed"
+                log.write(json.dumps({"status": status, "url": url, "title": title}) + "\n")
+            except Exception as e:
+                log.write(json.dumps({"status": "error", "url": url, "title": title, "error": str(e)}) + "\n")
+                print(f"   ⚠️  Error: {e}")
+
+if __name__ == "__main__":
+    base_dir = Path(__file__).parent
+    default_dataset = base_dir / "ski_analysis_dataset.json"
+    default_csv = base_dir / "ski_analysis_dataset.csv"
+    project_root = base_dir.parent.parent
+    default_output_dir = project_root / "data" / "raw_videos"
+    default_archive = default_output_dir / ".download_archive.txt"
+
+    parser = argparse.ArgumentParser(description="Search and download ski racing videos")
+    parser.add_argument("--download", action="store_true",
+                        help="Download videos from dataset instead of searching")
+    parser.add_argument("--dataset", default=str(default_dataset),
+                        help="Path to dataset (.json or .csv)")
+    parser.add_argument("--output-dir", default=str(default_output_dir),
+                        help="Output directory for downloads")
+    parser.add_argument("--max-videos", type=int, default=None,
+                        help="Limit number of videos to download")
+    parser.add_argument("--no-archive", action="store_true",
+                        help="Disable download archive file")
+    parser.add_argument("--target-total", type=int, default=40,
+                        help="Target number of videos to find (search mode)")
+    args = parser.parse_args()
+
+    if args.download:
+        archive = None if args.no_archive else default_archive
+        download_videos(
+            dataset_path=args.dataset,
+            output_dir=args.output_dir,
+            max_videos=args.max_videos,
+            archive_path=archive,
+        )
+    else:
+        search_skiing_videos(
+            target_total_videos=args.target_total,
+            output_json_path=str(default_dataset),
+            output_csv_path=str(default_csv),
+        )
