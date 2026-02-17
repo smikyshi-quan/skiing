@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-14T12:19:32.095691",
+  "model_alias": "models/gate_detector_best_20260213_2337_backup.pt",
+  "model_run_id": "gate_detector_20260213_2337",
+  "dataset": "data/annotations/final_combined_1class_20260213/data.yaml",
+  "split": "test",
+  "metrics": {
+    "mAP50": 0.33882716859224826,
+    "mAP50_95": 0.11916075936743571,
+    "precision": 0.36134996146503234,
+    "recall": 0.41001327943489657,
+    "f1": 0.3841465988213465
+  },
+  "per_class": {
+    "ap50": [
+      0.33882716859224826
+    ],
+    "ap50_95": [
+      0.11916075936743571
+    ]
+  },
+  "save_dir": "/Users/quan/Documents/personal/Stanford application project/runs/detect/val3"
+}

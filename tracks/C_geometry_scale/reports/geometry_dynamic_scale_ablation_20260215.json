@@ -1,0 +1,74 @@
+[
+  {
+    "run": "dynamic_on",
+    "video_id": "2907",
+    "analysis_json": "/tmp/cgeom_verify_gs8/2907_1765738705(Video in Original Quality)_analysis.json",
+    "correction_factor": 3.453215471233895,
+    "p90_speed_kmh": 189.92685091786424,
+    "applied": true,
+    "unable_to_calibrate": false,
+    "reason": "",
+    "dynamic_scale_enabled": false,
+    "dynamic_scale_frames": 497
+  },
+  {
+    "run": "dynamic_on",
+    "video_id": "2909",
+    "analysis_json": "/tmp/cgeom_verify_gs8/2909_1765738725(Video in Original Quality)_analysis.json",
+    "correction_factor": 3.3716964804966025,
+    "p90_speed_kmh": 185.44330642731313,
+    "applied": true,
+    "unable_to_calibrate": false,
+    "reason": "",
+    "dynamic_scale_enabled": false,
+    "dynamic_scale_frames": 454
+  },
+  {
+    "run": "dynamic_on",
+    "video_id": "2911",
+    "analysis_json": "/tmp/cgeom_verify_gs8/2911_1765738746(Video in Original Quality)_analysis.json",
+    "correction_factor": 4.2515792533972965,
+    "p90_speed_kmh": 233.8368589368513,
+    "applied": true,
+    "unable_to_calibrate": false,
+    "reason": "",
+    "dynamic_scale_enabled": false,
+    "dynamic_scale_frames": 463
+  },
+  {
+    "run": "dynamic_off",
+    "video_id": "2907",
+    "analysis_json": "/tmp/cgeom_verify_gs8_nodyn/2907_1765738705(Video in Original Quality)_analysis.json",
+    "correction_factor": 3.3903501165361525,
+    "p90_speed_kmh": 186.4692564094884,
+    "applied": true,
+    "unable_to_calibrate": false,
+    "reason": "",
+    "dynamic_scale_enabled": false,
+    "dynamic_scale_frames": 0
+  },
+  {
+    "run": "dynamic_off",
+    "video_id": "2909",
+    "analysis_json": "/tmp/cgeom_verify_gs8_nodyn/2909_1765738725(Video in Original Quality)_analysis.json",
+    "correction_factor": 3.2301379724652013,
+    "p90_speed_kmh": 177.65758848558607,
+    "applied": true,
+    "unable_to_calibrate": false,
+    "reason": "",
+    "dynamic_scale_enabled": false,
+    "dynamic_scale_frames": 0
+  },
+  {
+    "run": "dynamic_off",
+    "video_id": "2911",
+    "analysis_json": "/tmp/cgeom_verify_gs8_nodyn/2911_1765738746(Video in Original Quality)_analysis.json",
+    "correction_factor": 3.7216559077308933,
+    "p90_speed_kmh": 204.69107492519913,
+    "applied": true,
+    "unable_to_calibrate": false,
+    "reason": "",
+    "dynamic_scale_enabled": false,
+    "dynamic_scale_frames": 0
+  }
+]

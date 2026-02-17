@@ -32,9 +32,17 @@ def create_demo_video(video_path, analysis_path, output_path):
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
-    # Build frame -> position lookup
-    trajectory = {p["frame"]: (int(p["x"]), int(p["y"]))
-                  for p in analysis["trajectory_2d"]}
+    # Build frame -> position lookup (final and raw/debug)
+    trajectory = {
+        p["frame"]: (int(p["x"]), int(p["y"]))
+        for p in analysis.get("trajectory_2d", [])
+    }
+    raw_source = analysis.get("trajectory_2d_raw") or analysis.get("trajectory_2d_original") or []
+    trajectory_raw = {
+        p["frame"]: (int(p["x"]), int(p["y"]))
+        for p in raw_source
+    }
+    outlier_frames = set(int(f) for f in analysis.get("outlier_frames", []))
 
     # Gate positions (static fallback) or per-frame if available
     frame_gate_lookup = None
@@ -56,6 +64,7 @@ def create_demo_video(video_path, analysis_path, output_path):
 
     frame_num = 0
     trail_points = []
+    raw_trail_points = []
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -86,8 +95,14 @@ def create_demo_video(video_path, analysis_path, output_path):
         # Build trail
         if frame_num in trajectory:
             trail_points.append(trajectory[frame_num])
+        if frame_num in trajectory_raw:
+            raw_trail_points.append(trajectory_raw[frame_num])
 
-        # Draw trajectory trail
+        # Draw raw/debug trail first (thin orange)
+        for i in range(1, len(raw_trail_points)):
+            cv2.line(frame, raw_trail_points[i - 1], raw_trail_points[i], (0, 140, 255), 1)
+
+        # Draw filtered trajectory trail
         for i in range(1, len(trail_points)):
             cv2.line(frame, trail_points[i - 1], trail_points[i], (0, 255, 255), 3)
 
@@ -96,19 +111,26 @@ def create_demo_video(video_path, analysis_path, output_path):
             pos = trajectory[frame_num]
             cv2.circle(frame, pos, 20, (0, 255, 0), -1)
             cv2.circle(frame, pos, 25, (0, 255, 0), 3)
+            if frame_num in outlier_frames:
+                cv2.circle(frame, pos, 30, (0, 0, 255), 2)
+        if frame_num in outlier_frames and frame_num in trajectory_raw:
+            raw_pos = trajectory_raw[frame_num]
+            cv2.circle(frame, raw_pos, 10, (0, 0, 255), -1)
 
         # Text overlay
         cv2.putText(frame, f"Frame: {frame_num}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         cv2.putText(frame, f"Gates: {len(gate_positions)}", (10, 70),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(frame, f"Outliers: {len(outlier_frames)}", (10, 110),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 170, 255), 2)
 
         # Physics status
         physics = analysis.get("physics_validation")
         if physics:
             status = "PASS" if physics["valid"] else f"FAIL ({len(physics['issues'])} issues)"
             color = (0, 255, 0) if physics["valid"] else (0, 0, 255)
-            cv2.putText(frame, f"Physics: {status}", (10, 110),
+            cv2.putText(frame, f"Physics: {status}", (10, 145),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
 
         # Stabilization indicator

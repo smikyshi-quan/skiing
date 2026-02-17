@@ -398,7 +398,7 @@ def test_trajectory_jump_guard():
     ]
 
     trajectory_3d = transformer.transform_trajectory(
-        trajectory_2d, stabilize=False, max_jump_m=5.0
+        trajectory_2d, stabilize=False, max_jump_m=5.0, jump_guard=True
     )
 
     # Frame 2 should have been interpolated between frame 1 and frame 3

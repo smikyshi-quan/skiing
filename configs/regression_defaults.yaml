@@ -1,0 +1,18 @@
+# Frozen regression settings for Track E evaluation pipeline.
+gate_conf: 0.35
+gate_iou: 0.55
+stabilize: true
+camera_mode: affine
+projection: scale
+discipline: slalom
+# gate_spacing_m removed — pipeline uses discipline default (slalom=9.5m)
+
+# Explicit defaults used by process_video / pipeline for determinism.
+skier_conf: 0.25
+# camera_pitch_deg removed — auto-estimation was unreliable
+gate_search_frames: 150
+gate_search_stride: 5
+gate_track_frames: 120
+gate_track_stride: 3
+gate_track_min_obs: 3
+frame_stride: 1

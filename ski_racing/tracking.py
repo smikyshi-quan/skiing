@@ -11,6 +11,128 @@ import numpy as np
 from pathlib import Path
 
 
+class TrajectoryOutlierFilter:
+    """
+    Robust pre-smoothing outlier filter for 2D trajectories.
+
+    Uses a sliding-window median and MAD test. Flagged points are replaced
+    by interpolation between nearest inlier neighbors while preserving the
+    original detections for debugging.
+    """
+
+    def __init__(self, window=5, mad_threshold=3.0, min_mad_px=1.0):
+        self.window = max(3, int(window))
+        if self.window % 2 == 0:
+            self.window += 1
+        self.mad_threshold = float(mad_threshold)
+        self.min_mad_px = float(min_mad_px)
+
+    def filter(self, trajectory_2d):
+        """
+        Args:
+            trajectory_2d: List of {"frame", "x", "y", ...}
+
+        Returns:
+            (filtered_trajectory, diagnostics)
+        """
+        n = len(trajectory_2d)
+        if n == 0:
+            return trajectory_2d, {"outlier_count": 0, "outlier_frames": []}
+
+        filtered = [dict(pt) for pt in trajectory_2d]
+        half = self.window // 2
+        is_outlier = [False] * n
+
+        xs = np.array([float(pt["x"]) for pt in trajectory_2d], dtype=np.float64)
+        ys = np.array([float(pt["y"]) for pt in trajectory_2d], dtype=np.float64)
+
+        for i in range(n):
+            lo = max(0, i - half)
+            hi = min(n, i + half + 1)
+
+            win_x = xs[lo:hi]
+            win_y = ys[lo:hi]
+            if len(win_x) < 3:
+                continue
+
+            med_x = float(np.median(win_x))
+            med_y = float(np.median(win_y))
+            mad_x = float(np.median(np.abs(win_x - med_x)))
+            mad_y = float(np.median(np.abs(win_y - med_y)))
+
+            limit_x = self.mad_threshold * max(self.min_mad_px, mad_x)
+            limit_y = self.mad_threshold * max(self.min_mad_px, mad_y)
+
+            dx = abs(float(xs[i]) - med_x)
+            dy = abs(float(ys[i]) - med_y)
+            if dx > limit_x or dy > limit_y:
+                is_outlier[i] = True
+
+        outlier_frames = []
+        for i, pt in enumerate(filtered):
+            raw_x = float(pt["x"])
+            raw_y = float(pt["y"])
+            pt["raw_x"] = raw_x
+            pt["raw_y"] = raw_y
+            pt["is_outlier"] = bool(is_outlier[i])
+            if is_outlier[i]:
+                outlier_frames.append(int(pt["frame"]))
+
+        inlier_indices = [i for i in range(n) if not is_outlier[i]]
+        if not inlier_indices:
+            return filtered, {
+                "outlier_count": int(n),
+                "outlier_frames": outlier_frames,
+            }
+
+        for i in range(n):
+            if not is_outlier[i]:
+                continue
+
+            prev_idx = None
+            next_idx = None
+
+            j = i - 1
+            while j >= 0:
+                if not is_outlier[j]:
+                    prev_idx = j
+                    break
+                j -= 1
+
+            j = i + 1
+            while j < n:
+                if not is_outlier[j]:
+                    next_idx = j
+                    break
+                j += 1
+
+            if prev_idx is not None and next_idx is not None:
+                f0 = float(filtered[prev_idx]["frame"])
+                f1 = float(filtered[next_idx]["frame"])
+                fk = float(filtered[i]["frame"])
+                t = (fk - f0) / (f1 - f0) if f1 > f0 else 0.5
+                x0, y0 = float(filtered[prev_idx]["x"]), float(filtered[prev_idx]["y"])
+                x1, y1 = float(filtered[next_idx]["x"]), float(filtered[next_idx]["y"])
+                filtered[i]["x"] = float(x0 + t * (x1 - x0))
+                filtered[i]["y"] = float(y0 + t * (y1 - y0))
+                c0 = float(filtered[prev_idx].get("confidence", 0.5))
+                c1 = float(filtered[next_idx].get("confidence", 0.5))
+                filtered[i]["confidence"] = float(0.5 * (c0 + c1))
+            elif prev_idx is not None:
+                filtered[i]["x"] = float(filtered[prev_idx]["x"])
+                filtered[i]["y"] = float(filtered[prev_idx]["y"])
+                filtered[i]["confidence"] = float(filtered[prev_idx].get("confidence", 0.5))
+            elif next_idx is not None:
+                filtered[i]["x"] = float(filtered[next_idx]["x"])
+                filtered[i]["y"] = float(filtered[next_idx]["y"])
+                filtered[i]["confidence"] = float(filtered[next_idx].get("confidence", 0.5))
+
+        return filtered, {
+            "outlier_count": int(len(outlier_frames)),
+            "outlier_frames": outlier_frames,
+        }
+
+
 class KalmanSmoother:
     """
     Rauch-Tung-Striebel (RTS) smoother for 2D trajectory smoothing.
@@ -44,7 +166,8 @@ class KalmanSmoother:
     }
 
     def __init__(self, process_noise=None, measurement_noise=None, fps=30.0,
-                 discipline=None):
+                 discipline=None, innovation_gate=9.0,
+                 low_conf_threshold=0.5, low_conf_r_multiplier=2.5):
         """
         Args:
             process_noise: Expected acceleration std dev (pixels/s²).
@@ -57,6 +180,13 @@ class KalmanSmoother:
             fps: Video frame rate for time delta.
             discipline: "slalom", "giant_slalom", or "downhill".
                        Used to auto-tune process_noise if not specified.
+            innovation_gate: Mahalanobis gate threshold for innovation
+                             (squared distance). 9.0 ≈ 3σ for 2D.
+            low_conf_threshold: Detection confidence threshold where
+                                measurement noise starts increasing.
+            low_conf_r_multiplier: Maximum multiplier applied to
+                                   measurement noise std-dev when confidence
+                                   is near zero.
         """
         self.dt = 1.0 / fps
         self.discipline = discipline or "slalom"
@@ -64,6 +194,9 @@ class KalmanSmoother:
         defaults = self.DISCIPLINE_DEFAULTS.get(self.discipline, self.DISCIPLINE_DEFAULTS["slalom"])
         self.process_noise = process_noise if process_noise is not None else defaults["process_noise"]
         self.measurement_noise = measurement_noise if measurement_noise is not None else defaults["measurement_noise"]
+        self.innovation_gate = float(innovation_gate) if innovation_gate is not None else None
+        self.low_conf_threshold = float(low_conf_threshold)
+        self.low_conf_r_multiplier = float(max(1.0, low_conf_r_multiplier))
 
     def smooth(self, trajectory_2d):
         """
@@ -144,6 +277,8 @@ class KalmanSmoother:
         F_steps = []          # effective F matrix used for each prediction step
 
         prev_frame = trajectory_2d[0]["frame"]
+        gate_rejected = 0
+        gate_considered = 0
 
         for i, pt in enumerate(trajectory_2d):
             frame = pt["frame"]
@@ -177,16 +312,36 @@ class KalmanSmoother:
             covs_pred.append(P.copy())
 
             if i > 0:
-                # Update with measurement
+                # Update with measurement (Mahalanobis innovation gating)
                 y_innov = z - H @ state
-                S = H @ P @ H.T + R
-                try:
-                    K = P @ H.T @ np.linalg.inv(S)
-                except np.linalg.LinAlgError:
-                    K = np.zeros((4, 2))
+                det_conf = float(pt.get("confidence", 1.0))
+                conf_for_scale = float(np.clip(det_conf, 0.0, 1.0))
+                r_scale = 1.0
+                if conf_for_scale < self.low_conf_threshold and self.low_conf_threshold > 1e-6:
+                    frac = (self.low_conf_threshold - conf_for_scale) / self.low_conf_threshold
+                    r_scale = 1.0 + frac * (self.low_conf_r_multiplier - 1.0)
+                R_eff = R * (r_scale ** 2)
+                S = H @ P @ H.T + R_eff
+                use_update = True
+                gate_considered += 1
 
-                state = state + K @ y_innov
-                P = (np.eye(4) - K @ H) @ P
+                if self.innovation_gate is not None:
+                    try:
+                        S_inv = np.linalg.inv(S)
+                        mahal_sq = float(y_innov.T @ S_inv @ y_innov)
+                        if mahal_sq > self.innovation_gate:
+                            use_update = False
+                            gate_rejected += 1
+                    except np.linalg.LinAlgError:
+                        use_update = False
+
+                if use_update:
+                    try:
+                        K = P @ H.T @ np.linalg.inv(S)
+                    except np.linalg.LinAlgError:
+                        K = np.zeros((4, 2))
+                    state = state + K @ y_innov
+                    P = (np.eye(4) - K @ H) @ P
 
             # Store filtered (after update)
             states_filt.append(state.copy())
@@ -219,6 +374,10 @@ class KalmanSmoother:
                 "x": float(states_smooth[i][0]),
                 "y": float(states_smooth[i][1]),
             })
+
+        if gate_rejected > 0:
+            print(f"  ✓ Innovation gating: skipped {gate_rejected}/{gate_considered} "
+                  f"updates (mahal_sq > {self.innovation_gate:.1f})")
 
         # ── Over-smoothing diagnostic (Prof. feedback Phase 3) ──
         # If Q is too low, the filter cuts corners on sharp turns.
@@ -318,6 +477,20 @@ class SkierTracker:
             else:
                 model_name = "yolov8n.pt"
         self.model = YOLO(model_name)
+        self._tracker_cfg = self._resolve_tracker_config_path()
+        self._last_tracking_stats = {}
+
+    @staticmethod
+    def _resolve_tracker_config_path():
+        """Resolve local ByteTrack config path with tuned thresholds."""
+        project_root = Path(__file__).resolve().parent.parent
+        cfg_path = project_root / "configs" / "bytetrack_tuned.yaml"
+        if cfg_path.exists():
+            return str(cfg_path)
+        return "bytetrack.yaml"
+
+    def get_last_tracking_stats(self):
+        return dict(self._last_tracking_stats) if self._last_tracking_stats else {}
 
     def track_video(
         self,
@@ -326,6 +499,7 @@ class SkierTracker:
         frame_stride=1,
         max_frames=None,
         max_jump=None,
+        conf=0.25,
     ):
         """
         Track skier through an entire video.
@@ -342,103 +516,255 @@ class SkierTracker:
         """
         if method == "bytetrack":
             try:
-                return self._track_with_bytetrack(video_path)
+                trajectory = self._track_with_bytetrack_reassociate(
+                    video_path,
+                    conf=conf,
+                    max_jump=max_jump,
+                )
+                return trajectory
             except ModuleNotFoundError as e:
                 print(f"⚠️  ByteTrack dependency missing ({e}). Falling back to temporal tracking.")
-                return self._track_with_temporal_consistency(
+                trajectory = self._track_with_temporal_consistency(
                     video_path,
                     frame_stride=frame_stride,
                     max_frames=max_frames,
                     max_jump=max_jump,
+                    conf=conf,
                 )
+                self._last_tracking_stats["selected_method"] = "temporal"
+                self._last_tracking_stats["failure_reason"] = f"ModuleNotFoundError: {e}"
+                return trajectory
             except Exception as e:
                 print(f"⚠️  ByteTrack failed ({e}). Falling back to temporal tracking.")
-                return self._track_with_temporal_consistency(
+                trajectory = self._track_with_temporal_consistency(
                     video_path,
                     frame_stride=frame_stride,
                     max_frames=max_frames,
                     max_jump=max_jump,
+                    conf=conf,
                 )
+                self._last_tracking_stats["selected_method"] = "temporal"
+                self._last_tracking_stats["failure_reason"] = f"Exception: {e}"
+                return trajectory
         else:
-            return self._track_with_temporal_consistency(
+            trajectory = self._track_with_temporal_consistency(
                 video_path,
                 frame_stride=frame_stride,
                 max_frames=max_frames,
                 max_jump=max_jump,
+                conf=conf,
             )
+            self._last_tracking_stats["selected_method"] = "temporal"
+            return trajectory
 
-    def _track_with_bytetrack(self, video_path):
+    def _track_with_bytetrack_reassociate(self, video_path, conf=0.25, max_jump=None,
+                                          max_gap=30, reacquire_gap=15):
         """
-        Use YOLOv8's built-in ByteTrack for robust multi-person tracking.
-        Identifies the racer by assuming they are the most consistently
-        moving person in the frame (not static spectators).
+        Use YOLOv8's built-in ByteTrack detections but reassociate
+        targets frame-to-frame to avoid ID switches truncating the run.
         """
         trajectory = []
-        racer_id = None
 
         # Run tracking with persistence
         results = self.model.track(
             source=video_path,
             classes=[0],  # person class only
             persist=True,
-            tracker="bytetrack.yaml",
+            tracker=self._tracker_cfg,
+            conf=conf,
             verbose=False,
             stream=True,
         )
 
-        # First pass: identify which tracked ID is the racer
-        all_positions = {}  # id -> list of (frame, x, y)
-        total_frames = 0
+        last_pos = None
+        last_vel = (0.0, 0.0)
+        last_frame = None
+        last_area = None
+        last_track_id = None
+        missing = 0
+        track_id_switches = 0
+        track_id_changes_observed = 0
+        observed_frames = 0
 
         for frame_idx, result in enumerate(results):
-            total_frames += 1
-            if result.boxes.id is not None:
-                boxes = result.boxes.xyxy.cpu().numpy()
-                ids = result.boxes.id.cpu().numpy().astype(int)
+            observed_frames += 1
+            if result.boxes is None or len(result.boxes) == 0:
+                missing += 1
+                continue
 
-                for box, track_id in zip(boxes, ids):
-                    x = float((box[0] + box[2]) / 2)
-                    y = float((box[1] + box[3]) / 2)
+            boxes = result.boxes.xyxy.cpu().numpy()
+            confs = result.boxes.conf.cpu().numpy() if result.boxes.conf is not None else None
+            ids = result.boxes.id.cpu().numpy() if result.boxes.id is not None else None
 
-                    if track_id not in all_positions:
-                        all_positions[track_id] = []
-                    all_positions[track_id].append((frame_idx, x, y))
+            h, w = result.orig_shape[:2] if hasattr(result, "orig_shape") else (None, None)
+            if w is None or h is None:
+                # Fallback when orig_shape is missing
+                h, w = 720, 1280
 
-        # Racer heuristic: the person with the most movement
-        # (spectators are mostly static, racer moves continuously)
-        best_id = None
-        best_score = 0
-        min_frames = max(10, int(total_frames * 0.05)) if total_frames > 0 else 10
+            detections = []
+            for i, box in enumerate(boxes):
+                x = float((box[0] + box[2]) / 2)
+                y = float(box[3])
+                area = float((box[2] - box[0]) * (box[3] - box[1]))
+                c = float(confs[i]) if confs is not None else 0.5
+                det_id = int(ids[i]) if ids is not None and not np.isnan(ids[i]) else None
+                detections.append({
+                    "x": x,
+                    "y": y,
+                    "area": area,
+                    "confidence": c,
+                    "track_id": det_id,
+                })
 
-        for track_id, positions in all_positions.items():
-            if len(positions) < min_frames:
-                continue  # Skip brief detections
-            total_movement = 0
-            for i in range(1, len(positions)):
-                dx = positions[i][1] - positions[i - 1][1]
-                dy = positions[i][2] - positions[i - 1][2]
-                total_movement += (dx**2 + dy**2) ** 0.5
-            # Score favors sustained movement over brief bursts
-            score = total_movement
-            if score > best_score:
-                best_score = score
-                best_id = track_id
+            if not detections:
+                missing += 1
+                continue
 
-        if best_id is None:
-            print("⚠️  Could not identify racer. Falling back to temporal method.")
-            return self._track_with_temporal_consistency(video_path)
+            # Compute dynamic max jump
+            if max_jump is None:
+                base = 0.35 * min(w, h)
+                max_jump_px = min(base, 0.75 * max(w, h))
+            else:
+                max_jump_px = float(max_jump)
 
-        # Extract trajectory for the identified racer
-        racer_positions = all_positions[best_id]
-        trajectory = [
-            {"frame": pos[0], "x": pos[1], "y": pos[2]}
-            for pos in racer_positions
-        ]
+            chosen = None
+            if last_pos is None:
+                # First frame: choose detection closest to center
+                cx, cy = w / 2.0, h / 2.0
+                best = None
+                best_dist = float("inf")
+                for det in detections:
+                    dist = ((det["x"] - cx) ** 2 + (det["y"] - cy) ** 2) ** 0.5
+                    if dist < best_dist:
+                        best_dist = dist
+                        best = det
+                chosen = best
+            else:
+                gap = max(1, frame_idx - (last_frame if last_frame is not None else frame_idx))
+                pred_x = last_pos[0] + last_vel[0] * gap
+                pred_y = last_pos[1] + last_vel[1] * gap
 
-        avg_movement = best_score / len(racer_positions) if racer_positions else 0
-        print(f"✓ Identified racer (track_id={best_id}), "
-              f"tracked {len(trajectory)} frames, "
-              f"avg movement={avg_movement:.1f} px/frame")
+                if last_track_id is not None:
+                    for det in detections:
+                        if det.get("track_id") != last_track_id:
+                            continue
+                        dist_same = ((det["x"] - pred_x) ** 2 + (det["y"] - pred_y) ** 2) ** 0.5
+                        if dist_same <= max_jump_px * gap:
+                            chosen = det
+                            break
+
+                if chosen is not None:
+                    pass
+                else:
+                    best = None
+                    best_dist = float("inf")
+                    for det in detections:
+                        dist = ((det["x"] - pred_x) ** 2 + (det["y"] - pred_y) ** 2) ** 0.5
+                        if dist < best_dist:
+                            best_dist = dist
+                            best = det
+
+                    if best is not None and best_dist <= max_jump_px * gap:
+                        chosen = best
+                    elif gap > reacquire_gap:
+                        # Reacquire: choose most prominent detection
+                        best = None
+                        best_score = -float("inf")
+                        for det in detections:
+                            score = (det["area"] ** 0.5) * det["confidence"]  # area^0.5 * conf
+                            if score > best_score:
+                                best_score = score
+                                best = det
+                        if best is not None:
+                            within_pred = ((best["x"] - pred_x) ** 2 + (best["y"] - pred_y) ** 2) ** 0.5 <= 200.0
+                            if last_area is not None and last_area > 1e-6:
+                                area_ratio = best["area"] / last_area
+                                within_size = 0.5 <= area_ratio <= 1.5
+                            else:
+                                within_size = True
+                            if within_pred and within_size:
+                                chosen = best
+                    else:
+                        missing += 1
+                        if missing > max_gap:
+                            last_pos = None
+                            last_vel = (0.0, 0.0)
+                            last_frame = None
+                            last_area = None
+                            last_track_id = None
+                        continue
+
+            if chosen is None:
+                missing += 1
+                continue
+
+            x, y = chosen["x"], chosen["y"]
+            gap_to_prev = max(1, frame_idx - last_frame) if last_frame is not None else 1
+            if last_pos is not None and last_frame is not None:
+                gap = max(1, frame_idx - last_frame)
+                last_vel = ((x - last_pos[0]) / gap, (y - last_pos[1]) / gap)
+            current_track_id = chosen.get("track_id")
+            if (last_track_id is not None and current_track_id is not None
+                    and current_track_id != last_track_id):
+                track_id_changes_observed += 1
+                jump_px = ((x - last_pos[0]) ** 2 + (y - last_pos[1]) ** 2) ** 0.5 if last_pos is not None else 0.0
+                # Count only continuity-breaking switches.
+                if gap_to_prev <= 2 and jump_px > 500.0:
+                    track_id_switches += 1
+            last_pos = (x, y)
+            last_frame = frame_idx
+            last_area = float(chosen["area"])
+            last_track_id = current_track_id
+            missing = 0
+
+            trajectory.append({
+                "frame": frame_idx,
+                "x": x,
+                "y": y,
+                "confidence": float(chosen["confidence"]),
+                "track_id": current_track_id,
+                "bbox_area": float(chosen["area"]),
+            })
+
+        print(f"✓ ByteTrack reassociation: tracked {len(trajectory)} frames")
+
+        # If coverage is too low, fall back to temporal tracking
+        try:
+            cap = cv2.VideoCapture(video_path)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap.release()
+        except Exception:
+            total_frames = 0
+
+        bytetrack_valid_frames = len(trajectory)
+        coverage = (bytetrack_valid_frames / total_frames) if total_frames > 0 else 0.0
+        self._last_tracking_stats = {
+            "method_requested": "bytetrack",
+            "selected_method": "bytetrack",
+            "total_frames": int(total_frames) if total_frames > 0 else int(observed_frames),
+            "frames_with_valid_track": int(bytetrack_valid_frames),
+            "bytetrack_coverage": float(coverage),
+            "frames_fallback_used": 0,
+            "fallback_used": False,
+            "track_id_switches": int(track_id_switches),
+            "track_id_changes_observed": int(track_id_changes_observed),
+            "tracker_config": self._tracker_cfg,
+        }
+
+        if total_frames > 0 and coverage < 0.4:
+            print(f"⚠️  Low ByteTrack coverage ({coverage:.0%}). Falling back to temporal tracking.")
+            fallback_trajectory = self._track_with_temporal_consistency(
+                video_path,
+                frame_stride=1,
+                max_frames=None,
+                max_jump=max_jump,
+                conf=conf,
+                update_stats=False,
+            )
+            self._last_tracking_stats["selected_method"] = "temporal_fallback"
+            self._last_tracking_stats["frames_fallback_used"] = int(len(fallback_trajectory))
+            self._last_tracking_stats["fallback_used"] = True
+            return fallback_trajectory
 
         return trajectory
 
@@ -448,6 +774,8 @@ class SkierTracker:
         frame_stride=1,
         max_frames=None,
         max_jump=None,
+        conf=0.25,
+        update_stats=True,
     ):
         """
         Fallback tracking using temporal consistency.
@@ -476,34 +804,40 @@ class SkierTracker:
 
             if max_jump_px is None:
                 h, w = frame.shape[:2]
-                base = 0.25 * min(w, h)
-                max_jump_px = min(base * frame_stride, 0.6 * max(w, h))
+                base = 0.35 * min(w, h)
+                max_jump_px = min(base * frame_stride, 0.75 * max(w, h))
 
-            results = self.model(frame, classes=[0], verbose=False)
+            results = self.model(frame, classes=[0], conf=conf, verbose=False)
 
             if len(results[0].boxes) > 0:
                 boxes = results[0].boxes.xyxy.cpu().numpy()
+                confs = results[0].boxes.conf.cpu().numpy() if results[0].boxes.conf is not None else None
 
                 if prev_position is not None:
                     # Find detection closest to previous position
                     best_box = None
                     min_dist = float("inf")
 
-                    for box in boxes:
+                    for i, box in enumerate(boxes):
                         x = (box[0] + box[2]) / 2
-                        y = (box[1] + box[3]) / 2
+                        y = box[3]
                         dist = ((x - prev_position[0]) ** 2 + (y - prev_position[1]) ** 2) ** 0.5
 
                         if dist < max_jump_px and dist < min_dist:
                             min_dist = dist
-                            best_box = (float(x), float(y))
+                            c = float(confs[i]) if confs is not None else 0.5
+                            area = float((box[2] - box[0]) * (box[3] - box[1]))
+                            best_box = (float(x), float(y), c, area)
 
                     if best_box:
-                        prev_position = best_box
+                        prev_position = (best_box[0], best_box[1])
                         trajectory.append({
                             "frame": frame_num,
                             "x": best_box[0],
                             "y": best_box[1],
+                            "confidence": float(best_box[2]),
+                            "track_id": None,
+                            "bbox_area": float(best_box[3]),
                         })
                 else:
                     # First frame: pick center-most person (racer usually centered)
@@ -511,26 +845,43 @@ class SkierTracker:
                     best_box = None
                     min_dist = float("inf")
 
-                    for box in boxes:
+                    for i, box in enumerate(boxes):
                         x = (box[0] + box[2]) / 2
-                        y = (box[1] + box[3]) / 2
+                        y = box[3]
                         dist = abs(x - frame_center_x)
 
                         if dist < min_dist:
                             min_dist = dist
-                            best_box = (float(x), float(y))
+                            c = float(confs[i]) if confs is not None else 0.5
+                            area = float((box[2] - box[0]) * (box[3] - box[1]))
+                            best_box = (float(x), float(y), c, area)
 
                     if best_box:
-                        prev_position = best_box
+                        prev_position = (best_box[0], best_box[1])
                         trajectory.append({
                             "frame": frame_num,
                             "x": best_box[0],
                             "y": best_box[1],
+                            "confidence": float(best_box[2]),
+                            "track_id": None,
+                            "bbox_area": float(best_box[3]),
                         })
 
             frame_num += 1
 
         cap.release()
+        if update_stats:
+            self._last_tracking_stats = {
+                "method_requested": "temporal",
+                "selected_method": "temporal",
+                "total_frames": int(frame_num),
+                "frames_with_valid_track": int(len(trajectory)),
+                "bytetrack_coverage": 0.0,
+                "frames_fallback_used": int(frame_num),
+                "fallback_used": False,
+                "track_id_switches": 0,
+                "track_id_changes_observed": 0,
+            }
         return trajectory
 
     def get_video_info(self, video_path):

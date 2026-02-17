@@ -21,15 +21,21 @@ def main():
     parser = argparse.ArgumentParser(description="Process ski racing video(s)")
     parser.add_argument("input", help="Video file or directory of videos")
     parser.add_argument("--gate-model", required=True, help="Path to gate detector model")
-    parser.add_argument("--discipline", default="slalom",
-                        choices=["slalom", "giant_slalom", "downhill"])
-    parser.add_argument("--gate-spacing", type=float, default=12.0,
-                        help="Gate spacing in meters (12 for SL, 25-30 for GS)")
+    parser.add_argument("--discipline", default=None,
+                        choices=["slalom", "giant_slalom"],
+                        help="Discipline. If omitted, auto-detects slalom vs giant_slalom from gates")
+    parser.add_argument("--gate-spacing", type=float, default=None,
+                        help=("Gate spacing in meters. If omitted, uses discipline defaults: "
+                              "slalom=9.5, giant_slalom=27"))
     parser.add_argument("--projection", default="scale",
                         choices=["scale", "homography"],
                         help="Projection mode (scale uses gate spacing; homography uses global H)")
-    parser.add_argument("--gate-conf", type=float, default=0.3,
+    parser.add_argument("--gate-conf", type=float, default=0.35,
                         help="Gate detection confidence threshold")
+    parser.add_argument("--gate-iou", type=float, default=0.55,
+                        help="Gate detection NMS IoU threshold")
+    parser.add_argument("--skier-conf", type=float, default=0.25,
+                        help="Skier detection confidence threshold")
     parser.add_argument("--gate-search-frames", type=int, default=150,
                         help="Search first N frames for best gate detection")
     parser.add_argument("--gate-search-stride", type=int, default=5,
@@ -52,9 +58,18 @@ def main():
                         help="Max pixel jump for temporal tracking (override dynamic default)")
     parser.add_argument("--stabilize", action="store_true",
                         help="Enable camera stabilization + Kalman smoothing + dynamic scale (all 4 phases)")
-    parser.add_argument("--camera-mode", default="translation",
+    parser.add_argument("--camera-mode", default="affine",
                         choices=["translation", "affine"],
-                        help="Camera motion model for stabilization (translation or affine)")
+                        help="Camera motion model for stabilization (affine or translation)")
+    parser.add_argument("--camera-pitch-deg", "--camera-pitch", dest="camera_pitch_deg",
+                        type=float, default=6.0,
+                        help="Camera pitch angle in degrees for scale correction (set 0 to disable)")
+    parser.add_argument("--kalman-q", type=float, default=None,
+                        help="Override Kalman process noise (Q sigma_a in px/s^2)")
+    parser.add_argument("--camera-compensate-before-smoothing", action="store_true",
+                        help="Experimental order: track -> camera compensate 2D -> smooth -> transform")
+    parser.add_argument("--disable-dynamic-scale", action="store_true",
+                        help="Disable Phase 4 dynamic per-frame scale")
     args = parser.parse_args()
 
     pipeline = SkiRacingPipeline(
@@ -63,6 +78,7 @@ def main():
         gate_spacing_m=args.gate_spacing,
         stabilize=args.stabilize,
         camera_mode=args.camera_mode,
+        camera_pitch_deg=args.camera_pitch_deg,
     )
 
     input_path = Path(args.input)
@@ -85,6 +101,8 @@ def main():
                 validate_physics=not args.no_physics,
                 projection=args.projection,
                 gate_conf=args.gate_conf,
+                gate_iou=args.gate_iou,
+                skier_conf=args.skier_conf,
                 gate_search_frames=args.gate_search_frames,
                 gate_search_stride=args.gate_search_stride,
                 gate_track_frames=args.gate_track_frames,
@@ -93,6 +111,9 @@ def main():
                 frame_stride=args.frame_stride,
                 max_frames=args.max_frames,
                 max_jump=args.max_jump,
+                kalman_process_noise=args.kalman_q,
+                camera_compensate_before_smoothing=args.camera_compensate_before_smoothing,
+                enable_dynamic_scale=not args.disable_dynamic_scale,
             )
 
             analysis_path = Path(args.output_dir) / f"{video.stem}_analysis.json"

@@ -19,18 +19,19 @@ class GateDetector:
         """
         self.model = YOLO(model_path)
 
-    def detect_in_frame(self, frame, conf=0.3):
+    def detect_in_frame(self, frame, conf=0.35, iou=0.55):
         """
         Detect gates in a single frame.
 
         Args:
             frame: BGR image (numpy array).
             conf: Minimum confidence threshold.
+            iou: NMS IoU threshold.
 
         Returns:
             List of gate detections, each with class, center, base, confidence.
         """
-        results = self.model(frame, conf=conf, verbose=False)
+        results = self.model(frame, conf=conf, iou=iou, verbose=False)
         gates = []
 
         for box in results[0].boxes:
@@ -49,7 +50,7 @@ class GateDetector:
         gates.sort(key=lambda g: g["base_y"])
         return gates
 
-    def detect_from_first_frame(self, video_path, conf=0.3):
+    def detect_from_first_frame(self, video_path, conf=0.35, iou=0.55):
         """
         Detect gates from the first frame of a video.
         Best used before the race starts when all gates are fully visible.
@@ -57,6 +58,7 @@ class GateDetector:
         Args:
             video_path: Path to video file.
             conf: Minimum confidence threshold.
+            iou: NMS IoU threshold.
 
         Returns:
             List of gate detections.
@@ -68,15 +70,16 @@ class GateDetector:
         if not ret:
             raise ValueError(f"Could not read video: {video_path}")
 
-        return self.detect_in_frame(frame, conf=conf)
+        return self.detect_in_frame(frame, conf=conf, iou=iou)
 
-    def detect_from_best_frame(self, video_path, conf=0.3, max_frames=150, stride=5):
+    def detect_from_best_frame(self, video_path, conf=0.35, iou=0.55, max_frames=150, stride=5):
         """
         Scan early frames and return the frame with the most detected gates.
 
         Args:
             video_path: Path to video file.
             conf: Confidence threshold.
+            iou: NMS IoU threshold.
             max_frames: Max frames to scan from the start.
             stride: Process every Nth frame.
 
@@ -102,7 +105,7 @@ class GateDetector:
                 frame_idx += 1
                 continue
 
-            gates = self.detect_in_frame(frame, conf=conf)
+            gates = self.detect_in_frame(frame, conf=conf, iou=iou)
             if len(gates) > len(best_gates):
                 best_gates = gates
                 best_frame_idx = frame_idx
@@ -136,9 +139,10 @@ class TemporalGateTracker:
         self.max_missing = max_missing_frames
         self.match_threshold = match_threshold
         self.next_id = 0
-        self.frame_history = {}     # frame_idx -> {gate_id: (center_x, base_y)}
+        self.frame_history = {}     # frame_idx -> {gate_id: (center_x, base_y)} (detected-only)
+        self.frame_history_full = {}  # frame_idx -> {gate_id: gate_info} (includes interpolated)
 
-    def initialize(self, gates):
+    def initialize(self, gates, frame_idx=0):
         """
         Initialize tracker with gates detected from the first (clean) frame.
 
@@ -153,10 +157,11 @@ class TemporalGateTracker:
                 "class_name": gate.get("class_name", "unknown"),
             }
             self.missing_frames[self.next_id] = 0
-            self.confidence[self.next_id] = 1.0  # High confidence from clean frame
+            # Initialize with detector confidence if available
+            self.confidence[self.next_id] = float(gate.get("confidence", 0.9))
             self.next_id += 1
 
-    def update(self, detected_gates):
+    def update(self, detected_gates, frame_idx=None):
         """
         Update tracked gates with new detections.
         Handles occlusion gracefully by maintaining last known positions.
@@ -193,16 +198,16 @@ class TemporalGateTracker:
                 self.gate_memory[gate_id]["center_x"] = det["center_x"]
                 self.gate_memory[gate_id]["base_y"] = det["base_y"]
                 self.missing_frames[gate_id] = 0
-                self.confidence[gate_id] = min(1.0, self.confidence[gate_id] + 0.1)
+                # Smooth confidence using detector output if available
+                det_conf = float(det.get("confidence", self.confidence[gate_id]))
+                self.confidence[gate_id] = 0.7 * self.confidence[gate_id] + 0.3 * det_conf
                 matched_detections.add(best_match)
                 matched_tracked.add(gate_id)
             else:
                 # Gate not detected this frame
                 self.missing_frames[gate_id] += 1
                 # Decay confidence while missing
-                self.confidence[gate_id] = max(
-                    0.1, self.confidence[gate_id] - 0.05
-                )
+                self.confidence[gate_id] = max(0.1, self.confidence[gate_id] * 0.98)
 
         # Remove gates that have been missing too long
         to_remove = [
@@ -242,15 +247,28 @@ class TemporalGateTracker:
         Returns:
             List of all tracked gates (same as update()).
         """
-        result = self.update(detected_gates)
+        result = self.update(detected_gates, frame_idx=frame_idx)
 
         # Record current positions of all tracked gates for this frame
         frame_positions = {}
+        frame_positions_full = {}
         for gate_id, pos in self.gate_memory.items():
+            gate_info = {
+                "gate_id": int(gate_id),
+                "center_x": float(pos["center_x"]),
+                "base_y": float(pos["base_y"]),
+                "class": int(pos["class"]),
+                "class_name": pos["class_name"],
+                "confidence": float(self.confidence[gate_id]),
+                "is_interpolated": self.missing_frames.get(gate_id, 0) > 0,
+                "missing_frames": int(self.missing_frames.get(gate_id, 0)),
+            }
+            frame_positions_full[gate_id] = gate_info
             if self.missing_frames.get(gate_id, 0) == 0:
                 # Only record gates that were actually detected this frame
                 frame_positions[gate_id] = (pos["center_x"], pos["base_y"])
         self.frame_history[frame_idx] = frame_positions
+        self.frame_history_full[frame_idx] = frame_positions_full
 
         return result
 
@@ -262,6 +280,15 @@ class TemporalGateTracker:
             Dict: {frame_idx: {gate_id: (center_x, base_y)}}
         """
         return self.frame_history
+
+    def get_frame_history_full(self):
+        """
+        Get per-frame gate positions including interpolated (missing) gates.
+
+        Returns:
+            Dict: {frame_idx: {gate_id: gate_info}}
+        """
+        return self.frame_history_full
 
     def get_status(self):
         """Get summary of tracking status."""

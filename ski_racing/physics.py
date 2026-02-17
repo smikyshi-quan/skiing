@@ -141,6 +141,14 @@ class PhysicsValidator:
                     f"(limit: {self.limits['max_acceleration_ms2']})"
                 )
 
+        speeds_arr = np.asarray(speeds, dtype=float) if speeds else np.asarray([], dtype=float)
+        speeds_nz = speeds_arr[speeds_arr > 1e-3]
+        if len(speeds_nz) < max(10, int(0.5 * len(speeds_arr))):
+            speeds_nz = speeds_arr
+
+        def _pct(arr, q):
+            return float(np.percentile(arr, q)) if len(arr) else 0.0
+
         return {
             "valid": len(issues) == 0,
             "issues": issues,
@@ -150,6 +158,11 @@ class PhysicsValidator:
                     "max": float(max(speeds)) if speeds else 0,
                     "mean": float(np.mean(speeds)) if speeds else 0,
                     "std": float(np.std(speeds)) if speeds else 0,
+                    "median": _pct(speeds_nz, 50),
+                    "p90": _pct(speeds_nz, 90),
+                    "p95": _pct(speeds_nz, 95),
+                    "n": int(len(speeds_arr)),
+                    "n_nonzero": int(len(speeds_nz)),
                 },
                 "g_forces": {
                     "max": float(max(g_forces)) if g_forces else 0,
@@ -323,6 +336,8 @@ class PhysicsValidator:
         print("-" * 60)
 
         print(f"\n  Speed (km/h):  {m['speeds_kmh']['mean']:.1f} avg, "
+              f"{m['speeds_kmh']['median']:.1f} med, "
+              f"{m['speeds_kmh']['p90']:.1f} p90, "
               f"{m['speeds_kmh']['max']:.1f} max, "
               f"{m['speeds_kmh']['min']:.1f} min")
 

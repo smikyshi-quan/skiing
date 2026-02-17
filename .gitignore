@@ -11,9 +11,17 @@ data/annotations/*.png
 models/*.pt
 runs/
 
+# Keep the exact weights used by the pipeline for reproducibility.
+!models/gate_detector_best.pt
+!models/yolov8n.pt
+
 # Outputs
 artifacts/outputs/
 artifacts/training_results/
+
+# Eval / pipeline temp
+_stage2_tmp/
+stage2_tmp/
 
 # Python
 __pycache__/
