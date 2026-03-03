@@ -1,0 +1,61 @@
+[
+  {
+    "video": "IMG_1478.MOV",
+    "status": "ok",
+    "elapsed_s": 131.16011691093445
+  },
+  {
+    "video": "28_1752484118(\u539f\u89c6\u9891).mp4",
+    "status": "ok",
+    "elapsed_s": 56.59672498703003
+  },
+  {
+    "video": "30_1752484596(\u539f\u89c6\u9891).mp4",
+    "status": "ok",
+    "elapsed_s": 115.96719121932983
+  },
+  {
+    "video": "38_1752843425(\u539f\u89c6\u9891).mp4",
+    "status": "ok",
+    "elapsed_s": 70.34808611869812
+  },
+  {
+    "video": "594_1732936638(\u539f\u89c6\u9891).mp4",
+    "status": "ok",
+    "elapsed_s": 148.64943504333496
+  },
+  {
+    "video": "IMG_1309.MOV",
+    "status": "ok",
+    "elapsed_s": 82.49382495880127
+  },
+  {
+    "video": "mmexport1704088159935.mp4",
+    "status": "error",
+    "elapsed_s": 0.23687982559204102,
+    "error": "Insufficient distinct gates for scale/projection. Detected 1 gate(s) after clustering; need >=2. Try a lower --gate-conf, different video segment, or verify the gate model."
+  },
+  {
+    "video": "mmexport1704089261026.mp4",
+    "status": "error",
+    "elapsed_s": 43.66430115699768,
+    "error": "Insufficient distinct gates for scale/projection. Detected 1 gate(s) after clustering; need >=2. Try a lower --gate-conf, different video segment, or verify the gate model."
+  },
+  {
+    "video": "mmexport1706098456374.mp4",
+    "status": "error",
+    "elapsed_s": 23.380582094192505,
+    "error": "Insufficient distinct gates for scale/projection. Detected 1 gate(s) after clustering; need >=2. Try a lower --gate-conf, different video segment, or verify the gate model."
+  },
+  {
+    "video": "\u957f\u57ce\u5cad12.12(\u539f\u89c6\u9891).mp4",
+    "status": "ok",
+    "elapsed_s": 193.81117606163025
+  },
+  {
+    "video": "\u957f\u57ce\u5cad12.8.mp4",
+    "status": "error",
+    "elapsed_s": 50.27917194366455,
+    "error": "Insufficient distinct gates for scale/projection. Detected 1 gate(s) after clustering; need >=2. Try a lower --gate-conf, different video segment, or verify the gate model."
+  }
+]

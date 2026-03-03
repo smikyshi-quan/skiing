@@ -1,0 +1,4 @@
+video,gates_count,confirmed_gate_count,ghost_gate_count_raw,ghost_gate_count,interp_rate_overall,oob_points,traj_points,runtime_total_sec,analysis_json
+1592_raw.MP4,1,1,2,0,0.23109243697478993,0,1779,191.808,/Users/quan/Documents/personal/Stanford application project/tests/sweeps_gate_single_best_20260228_185055/1592_raw/1592_raw_analysis.json
+mmexport1704641869528.mp4,1,0,0,0,0.0,0,466,20.558,/Users/quan/Documents/personal/Stanford application project/tests/sweeps_gate_single_best_20260228_185055/mmexport1704641869528/mmexport1704641869528_analysis.json
+mmexport1706076255933.mp4,5,5,0,0,0.37094682230869,0,569,36.222,/Users/quan/Documents/personal/Stanford application project/tests/sweeps_gate_single_best_20260228_185055/mmexport1706076255933/mmexport1706076255933_analysis.json

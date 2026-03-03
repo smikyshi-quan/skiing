@@ -1,0 +1,22 @@
+Processing 1592_raw.MP4... [gate-full-track outlier-filter]
+  Video: 3840x2160 @ 60.0 fps, 1919 frames
+  [1/3] Detecting gates...
+         Found 3 gates after clustering
+         Auto-detected: giant_slalom (3 gates visible, median gap 334px = 15.5% of frame height)
+  [2/3] Tracking gates across all frames...
+         Tracked 1 gates across 640 frames (640 frames with detections)
+         Filtered 2 ghost gate track(s) from frame history export
+         1 stable gates after temporal tracking
+  ⚠️  Only 1 gate(s) detected. Gate detection needs improvement. Continuing with skier tracking only.
+  [2/3] Tracking skier...
+✓ ByteTrack reassociation: tracked 1779 frames
+         Tracked 1779 positions (93% coverage)
+         ByteTrack coverage: 92.7%, ID switches: 0
+         Outlier filter: corrected 34 frames
+  Runtime profile (seconds):
+    Gate detection (initial frame search): 0.411
+    Gate tracking pass: 72.660
+    Skier tracking (full video pass): 121.926
+    Kalman smoothing: 0.000
+
+✓ Results saved to /Users/quan/Documents/personal/Stanford application project/tests/sweeps_gate_consensus_20260228_183749/support_2/1592_raw/1592_raw_analysis.json

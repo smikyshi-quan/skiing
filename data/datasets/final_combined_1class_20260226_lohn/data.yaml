@@ -1,0 +1,8 @@
+# Low hard-negative dataset for 2D-first sprint (2026-02-26)
+# Base: final_combined_1class_20260226_curated
+# Hard-negatives reduced: 100 -> 20 (7.1% of train, was 27.8%)
+train: train/images
+val: valid/images
+test: test/images
+nc: 1
+names: ['gate']

@@ -1,0 +1,12 @@
+{
+  "clip_id": "test",
+  "events": [
+    {
+      "frame_idx": 5,
+      "event": "INITIALIZED",
+      "buffer_depth_at_trigger": 6,
+      "gates_confirmed": 6,
+      "s_star_at_trigger": -0.5
+    }
+  ]
+}

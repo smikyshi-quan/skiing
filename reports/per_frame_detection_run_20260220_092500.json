@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-02-20T09:25:00.214450",
+  "model": "/sessions/zealous-vigilant-ritchie/mnt/Stanford application project/tracks/B_model_retraining/runs/detect/gate_detector_hardfix_lowlr_20260215_1120/weights/best.pt",
+  "videos": [
+    "/sessions/zealous-vigilant-ritchie/mnt/uploads/mmexport1704089261026.mp4"
+  ],
+  "output_dir": "/tmp/unseen_test/detections",
+  "schema": "/sessions/zealous-vigilant-ritchie/mnt/Stanford application project/shared/interfaces/per_frame_detections.schema.json",
+  "summaries": [
+    {
+      "clip_id": "mmexport1704089261026",
+      "video_path": "/sessions/zealous-vigilant-ritchie/mnt/uploads/mmexport1704089261026.mp4",
+      "frames_written": 798,
+      "detections_total": 7689,
+      "tier_counts": {
+        "1": 136,
+        "2": 2588,
+        "3": 4965
+      },
+      "geometry_failures": 72,
+      "emission_positive_violations": 0,
+      "bev_source": {
+        "clip_bev_found": true,
+        "frames_from_bev": 160,
+        "frames_from_stub": 638
+      },
+      "keypoint_source": {
+        "native_pose": 0,
+        "bootstrap_from_bbox": 7689
+      },
+      "jitter_samples": {
+        "tier2": 2117,
+        "tier3": 4396,
+        "tier2_counterfactual_tier3": 2117
+      },
+      "jitter_std": {
+        "tier2": 108.86551553609566,
+        "tier3": 69.63930796905522,
+        "tier2_counterfactual_tier3": 192.6239810725591
+      },
+      "json_path": "/tmp/unseen_test/detections/mmexport1704089261026_detections.json"
+    }
+  ],
+  "ablation_report": "/sessions/zealous-vigilant-ritchie/mnt/Stanford application project/reports/ablation_fallback_20260220.md"
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "video": "1571_raw.MP4",
+    "min_gates": 0,
+    "p50_gates": 11.0,
+    "max_gates": 21,
+    "avg_infer_ms": 164.99874301408843,
+    "p95_infer_ms": 549.1856672982973,
+    "overlay_video": "/Users/quan/Documents/personal/Stanford application project/outputs/gate_live_retest_20260303_163150/1571_raw_live_gates.mp4",
+    "summary_json": "/Users/quan/Documents/personal/Stanford application project/outputs/gate_live_retest_20260303_163150/1571_raw_live_gates_summary.json"
+  },
+  {
+    "video": "1575_raw.MP4",
+    "min_gates": 0,
+    "p50_gates": 6.0,
+    "max_gates": 20,
+    "avg_infer_ms": 64.75025046618363,
+    "p95_infer_ms": 102.11171875162107,
+    "overlay_video": "/Users/quan/Documents/personal/Stanford application project/outputs/gate_live_retest_20260303_163150/1575_raw_live_gates.mp4",
+    "summary_json": "/Users/quan/Documents/personal/Stanford application project/outputs/gate_live_retest_20260303_163150/1575_raw_live_gates_summary.json"
+  },
+  {
+    "video": "IMG_1310.MOV",
+    "min_gates": 1,
+    "p50_gates": 14.0,
+    "max_gates": 21,
+    "avg_infer_ms": 51.011543116307344,
+    "p95_infer_ms": 56.71117850215523,
+    "overlay_video": "/Users/quan/Documents/personal/Stanford application project/outputs/gate_live_retest_20260303_163150/IMG_1310_live_gates.mp4",
+    "summary_json": "/Users/quan/Documents/personal/Stanford application project/outputs/gate_live_retest_20260303_163150/IMG_1310_live_gates_summary.json"
+  }
+]

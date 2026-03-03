@@ -1,0 +1,82 @@
+{
+  "split_date": "20260219",
+  "clips": [
+    {
+      "clip_id": "Lucas GS T",
+      "condition_terrain": "steep",
+      "condition_visibility": "occluded",
+      "condition_pan": "high",
+      "condition_light": "normal",
+      "failure_labels": [
+        "rolling_shutter"
+      ]
+    },
+    {
+      "clip_id": "MO GS R",
+      "condition_terrain": "steep",
+      "condition_visibility": "clear",
+      "condition_pan": "high",
+      "condition_light": "normal",
+      "failure_labels": []
+    },
+    {
+      "clip_id": "MO GS T2",
+      "condition_terrain": "flat",
+      "condition_visibility": "clear",
+      "condition_pan": "low",
+      "condition_light": "flat",
+      "failure_labels": []
+    },
+    {
+      "clip_id": "MS GS R2",
+      "condition_terrain": "steep",
+      "condition_visibility": "occluded",
+      "condition_pan": "low",
+      "condition_light": "flat",
+      "failure_labels": [
+        "snow_glare"
+      ]
+    },
+    {
+      "clip_id": "MS SL",
+      "condition_terrain": "flat",
+      "condition_visibility": "clear",
+      "condition_pan": "high",
+      "condition_light": "normal",
+      "failure_labels": [
+        "track_swap"
+      ]
+    },
+    {
+      "clip_id": "MS SL R",
+      "condition_terrain": "flat",
+      "condition_visibility": "occluded",
+      "condition_pan": "low",
+      "condition_light": "normal",
+      "failure_labels": [
+        "occlusion"
+      ]
+    },
+    {
+      "clip_id": "Mikaela Shifferin Slolom2",
+      "condition_terrain": "steep",
+      "condition_visibility": "clear",
+      "condition_pan": "low",
+      "condition_light": "flat",
+      "failure_labels": [
+        "eis_jump"
+      ]
+    },
+    {
+      "clip_id": "Screen Recording 2026-02-07 at 15.01.01",
+      "condition_terrain": "flat",
+      "condition_visibility": "occluded",
+      "condition_pan": "high",
+      "condition_light": "flat",
+      "failure_labels": [
+        "rolling_shutter",
+        "eis_jump"
+      ]
+    }
+  ]
+}

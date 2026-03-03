@@ -12,7 +12,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 
-def create_demo_video(video_path, analysis_path, output_path):
+def create_demo_video(video_path, analysis_path, output_path,
+                      gate_model_path=None, live_gate_stride=3):
     """
     Create demo video with trajectory and gate overlay.
 
@@ -20,6 +21,10 @@ def create_demo_video(video_path, analysis_path, output_path):
         video_path: Path to original video.
         analysis_path: Path to analysis JSON (from pipeline).
         output_path: Path for output video.
+        gate_model_path: Path to gate detector model. When provided, gates are
+            re-detected live on each frame so positions follow the camera exactly.
+        live_gate_stride: Run live inference every N frames (default 3).
+            Lower = more accurate but slower rendering.
     """
     with open(analysis_path, "r") as f:
         analysis = json.load(f)
@@ -44,24 +49,34 @@ def create_demo_video(video_path, analysis_path, output_path):
     }
     outlier_frames = set(int(f) for f in analysis.get("outlier_frames", []))
 
-    # Gate positions (static fallback) or per-frame if available
+    # Live detector: re-detect gates on each frame so positions follow the camera
+    live_detector = None
+    if gate_model_path is not None:
+        from ski_racing.detection import GateDetector
+        live_detector = GateDetector(gate_model_path)
+    live_cache = []        # last live-detected gate positions
+    live_frame_at = -999   # frame index of last live inference run
+
+    # Static/per-frame fallback (used when live_detector is None)
     frame_gate_lookup = None
     last_gate_positions = None
-    if "frames" in analysis:
-        frame_gate_lookup = {}
-        for frame_entry in analysis.get("frames", []):
-            frame_idx = frame_entry.get("frame")
-            gates = []
-            for g in frame_entry.get("gates", []):
-                if "center_x" in g and "base_y" in g:
-                    gates.append((int(g["center_x"]), int(g["base_y"]), g))
-            frame_gate_lookup[frame_idx] = gates
-    else:
-        gate_positions = [
-            (int(g["center_x"]), int(g["base_y"]), g)
-            for g in analysis.get("gates", [])
-        ]
+    if live_detector is None:
+        if "frames" in analysis:
+            frame_gate_lookup = {}
+            for frame_entry in analysis.get("frames", []):
+                frame_idx = frame_entry.get("frame")
+                gates = []
+                for g in frame_entry.get("gates", []):
+                    if "center_x" in g and "base_y" in g:
+                        gates.append((int(g["center_x"]), int(g["base_y"]), g))
+                frame_gate_lookup[frame_idx] = gates
+        else:
+            gate_positions = [
+                (int(g["center_x"]), int(g["base_y"]), g)
+                for g in analysis.get("gates", [])
+            ]
 
+    gate_positions = []
     frame_num = 0
     trail_points = []
     raw_trail_points = []
@@ -71,15 +86,31 @@ def create_demo_video(video_path, analysis_path, output_path):
         if not ret:
             break
 
-        # Resolve per-frame gates if available
-        if frame_gate_lookup is not None:
-            if frame_num in frame_gate_lookup:
-                gate_positions = frame_gate_lookup[frame_num]
-                last_gate_positions = gate_positions
+        # Resolve gate positions for this frame
+        if live_detector is not None:
+            # Live mode: re-detect every live_gate_stride frames, cache between
+            if frame_num - live_frame_at >= live_gate_stride:
+                dets = live_detector.detect_in_frame(frame, conf=0.20, iou=0.45)
+                live_cache = [(int(d["center_x"]), int(d["base_y"]), d) for d in dets]
+                live_frame_at = frame_num
+            gate_positions = live_cache
+        elif frame_gate_lookup is not None:
+            # Per-frame data: only show gates that were actually detected
+            # (skip is_interpolated=True — those are stale positions from when
+            # the gate wasn't visible, not real current detections)
+            raw = frame_gate_lookup.get(frame_num, None)
+            if raw is not None:
+                gate_positions = [
+                    (gx, gy, gm) for gx, gy, gm in raw
+                    if not (isinstance(gm, dict) and gm.get("is_interpolated", False))
+                ]
+                if gate_positions:
+                    last_gate_positions = gate_positions
             elif last_gate_positions is not None:
                 gate_positions = last_gate_positions
             else:
                 gate_positions = []
+        # else: static gate_positions set above the loop, unchanged each frame
 
         # Draw gates
         for i, (gx, gy, gmeta) in enumerate(gate_positions):
@@ -106,17 +137,6 @@ def create_demo_video(video_path, analysis_path, output_path):
         for i in range(1, len(trail_points)):
             cv2.line(frame, trail_points[i - 1], trail_points[i], (0, 255, 255), 3)
 
-        # Draw current position
-        if frame_num in trajectory:
-            pos = trajectory[frame_num]
-            cv2.circle(frame, pos, 20, (0, 255, 0), -1)
-            cv2.circle(frame, pos, 25, (0, 255, 0), 3)
-            if frame_num in outlier_frames:
-                cv2.circle(frame, pos, 30, (0, 0, 255), 2)
-        if frame_num in outlier_frames and frame_num in trajectory_raw:
-            raw_pos = trajectory_raw[frame_num]
-            cv2.circle(frame, raw_pos, 10, (0, 0, 255), -1)
-
         # Text overlay
         cv2.putText(frame, f"Frame: {frame_num}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
@@ -125,12 +145,21 @@ def create_demo_video(video_path, analysis_path, output_path):
         cv2.putText(frame, f"Outliers: {len(outlier_frames)}", (10, 110),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 170, 255), 2)
 
+        course_total = analysis.get("course_gates_count")
+        y_cursor = 150
+        if course_total is not None:
+            cv2.putText(frame, f"Course Total: {course_total}",
+                        (10, y_cursor), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            y_cursor += 40
+        else:
+            y_cursor = 145
+
         # Physics status — guard against sentinel string "disabled"
         physics = analysis.get("physics_validation")
         if isinstance(physics, dict):
             status = "PASS" if physics.get("valid") else f"FAIL ({len(physics.get('issues', []))} issues)"
             color = (0, 255, 0) if physics.get("valid") else (0, 0, 255)
-            cv2.putText(frame, f"Physics: {status}", (10, 145),
+            cv2.putText(frame, f"Physics: {status}", (10, y_cursor),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
 
         # Stabilization indicator

@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 import torch
+import warnings
 
 # ---------------------------------------------------------------------------
 # Monkey-patch: raise the default NMS per-image time limit from 0.05s to 0.5s.
@@ -49,29 +50,114 @@ def _patch_nms_time_limit():
 _patch_nms_time_limit()
 
 
+def _patch_tal_mps_cpu_fallback():
+    """Work around known PyTorch MPS indexing bugs in Ultralytics TAL assigner.
+
+    During training, TaskAlignedAssigner can trigger MPS kernel index errors on
+    some batches. We run TAL assignment on CPU when tensors are on MPS, then
+    move outputs back to MPS. TAL is no-grad target assignment, so this is safe.
+    """
+    try:
+        from ultralytics.utils import tal
+    except Exception:
+        return
+
+    orig_forward = getattr(tal.TaskAlignedAssigner, "forward", None)
+    if orig_forward is None or getattr(tal.TaskAlignedAssigner, "_codex_mps_patch", False):
+        return
+
+    def _forward_mps_safe(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt):
+        if gt_bboxes.device.type != "mps":
+            return orig_forward(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt)
+
+        self.bs = pd_scores.shape[0]
+        self.n_max_boxes = gt_bboxes.shape[1]
+        if self.n_max_boxes == 0:
+            return (
+                torch.full_like(pd_scores[..., 0], self.num_classes),
+                torch.zeros_like(pd_bboxes),
+                torch.zeros_like(pd_scores),
+                torch.zeros_like(pd_scores[..., 0]),
+                torch.zeros_like(pd_scores[..., 0]),
+            )
+
+        device = gt_bboxes.device
+        cpu_tensors = [t.cpu() for t in (pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt)]
+        result = self._forward(*cpu_tensors)
+        return tuple(t.to(device) for t in result)
+
+    tal.TaskAlignedAssigner.forward = _forward_mps_safe
+    tal.TaskAlignedAssigner._codex_mps_patch = True
+    print("✓ Patched TAL assigner: CPU fallback when device is MPS")
+
+
+_patch_tal_mps_cpu_fallback()
+
+
+def _mps_tal_smoke_test() -> bool:
+    """Run a quick TAL assigner smoke-test on MPS to detect the known indexing bug.
+
+    The bug (torch.AcceleratorError: index out of bounds in tal.py:get_box_metrics)
+    manifests as MPS returning wrong indices from boolean-mask advanced indexing.
+    This test replicates the exact operation that crashes, using realistic shapes
+    (batch=8, 8400 anchors, 10 GT boxes).  Returns True if MPS is safe to use.
+    """
+    try:
+        import torch as _torch
+        _dev = _torch.device("mps")
+        bs, na, ng = 8, 8400, 10
+        gt_bboxes   = _torch.rand(bs, ng, 4,     device=_dev)
+        mask_gt     = _torch.rand(bs, ng,         device=_dev) > 0.2   # sparse
+        mask_in_gts = _torch.rand(bs, ng, na,     device=_dev) > 0.95  # ~5% match
+        combined    = mask_in_gts * mask_gt.unsqueeze(-1)
+        _result     = gt_bboxes.unsqueeze(2).expand(-1, -1, na, -1)[combined]
+        # Force sync — MPS is async, errors surface on .cpu() / item()
+        _ = _result.sum().item()
+        return True
+    except Exception:
+        return False
+
+
 def _resolve_device(device: str, *, training: bool = True) -> str:
     """Resolve device string to an available compute device.
 
-    Priority when training: CUDA > CPU (MPS is skipped — PyTorch MPS backend
-    has known shape-mismatch bugs in the Task-Aligned Assigner during training).
-    Priority for inference: MPS > CUDA > CPU.
-    Raises RuntimeError if a specific device is requested but unavailable.
+    Training priority:
+      - 'auto'  → CUDA > MPS (with TAL smoke-test) > CPU
+      - 'mps'   → MPS if available and passes TAL smoke-test, else CPU fallback
+      - 'cpu'   → CPU always
+    Inference priority: MPS > CUDA > CPU.
+    Raises RuntimeError only for explicit CUDA when unavailable.
     """
     if device == "auto":
-        if not training and torch.backends.mps.is_available():
-            return "mps"
         if torch.cuda.is_available():
             return "cuda"
+        if training and torch.backends.mps.is_available():
+            if _mps_tal_smoke_test():
+                print("✓ MPS TAL smoke-test passed — using MPS for training")
+                return "mps"
+            else:
+                print("⚠️  MPS TAL smoke-test failed — falling back to CPU")
+                return "cpu"
+        if not training and torch.backends.mps.is_available():
+            return "mps"
         return "cpu"
 
     if device == "mps":
         if not torch.backends.mps.is_available():
             built = torch.backends.mps.is_built()
-            raise RuntimeError(
+            warnings.warn(
                 "MPS requested but not available. "
-                f"mps_built={built}. "
-                "Ensure you're using arm64 Python (not Rosetta) and a PyTorch build with MPS support."
+                f"mps_built={built}. Falling back to CPU.",
+                stacklevel=2,
             )
+            return "cpu"
+        if training and not _mps_tal_smoke_test():
+            warnings.warn(
+                "MPS requested for training but TAL smoke-test failed; "
+                "falling back to CPU for stability.",
+                stacklevel=2,
+            )
+            return "cpu"
         return "mps"
 
     if device == "cuda":

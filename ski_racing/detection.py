@@ -81,8 +81,8 @@ class GateDetector:
           where the skier starts late or camera pans before the race.
         - Smaller stride (3 instead of 5) for denser sampling.
         - Lower default conf/iou to maximise recall.
-        - Multi-frame consensus: also tries a lowered conf pass if the best
-          result still has fewer than 2 gates.
+        - Low-confidence fallback on the selected best frame if it still has
+          fewer than 2 gates.
 
         Args:
             video_path: Path to video file.
@@ -149,6 +149,152 @@ class GateDetector:
                     break
 
         return best_gates
+
+    def detect_from_consensus(
+        self,
+        video_path,
+        conf=0.25,
+        iou=0.45,
+        max_frames=300,
+        stride=3,
+        min_support=3,
+        frame_height=None,
+    ):
+        """
+        Build gate seeds by clustering detections across sampled early frames.
+
+        Falls back to detect_from_best_frame when consensus cannot confirm at
+        least two gate clusters.
+        """
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video: {video_path}")
+
+        stride = max(1, int(stride))
+        max_frames = max(1, int(max_frames))
+        min_support = max(1, int(min_support))
+
+        all_detections = []
+        sampled_frames = 0
+        frame_idx = 0
+        inferred_height = None
+
+        while cap.isOpened() and frame_idx < max_frames:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % stride != 0:
+                frame_idx += 1
+                continue
+            if inferred_height is None and frame is not None:
+                inferred_height = int(frame.shape[0])
+            gates = self.detect_in_frame(frame, conf=conf, iou=iou)
+            for gate in gates:
+                det = dict(gate)
+                det["frame_idx"] = int(frame_idx)
+                all_detections.append(det)
+            sampled_frames += 1
+            frame_idx += 1
+        cap.release()
+
+        if frame_height is None:
+            frame_height = inferred_height
+        frame_height = int(frame_height) if frame_height else 720
+        cluster_thresh = max(12.0, 0.10 * float(frame_height))
+
+        candidates = sorted(
+            all_detections,
+            key=lambda d: (
+                float(d.get("base_y", 0.0)),
+                float(d.get("center_x", 0.0)),
+                int(d.get("frame_idx", 0)),
+                -float(d.get("confidence", 0.0)),
+            ),
+        )
+        clusters = []
+
+        for det in candidates:
+            det_x = float(det.get("center_x", 0.0))
+            det_y = float(det.get("base_y", 0.0))
+            best_idx = -1
+            best_dist = float("inf")
+            for idx, cluster in enumerate(clusters):
+                cx = float(cluster["center_x_mean"])
+                cy = float(cluster["base_y_mean"])
+                dist = ((det_x - cx) ** 2 + (det_y - cy) ** 2) ** 0.5
+                if dist <= cluster_thresh and dist < best_dist:
+                    best_dist = dist
+                    best_idx = idx
+            if best_idx >= 0:
+                cluster = clusters[best_idx]
+                cluster["items"].append(det)
+                cluster["frame_ids"].add(int(det["frame_idx"]))
+                n_items = len(cluster["items"])
+                cluster["center_x_mean"] = (
+                    (cluster["center_x_mean"] * (n_items - 1) + det_x) / n_items
+                )
+                cluster["base_y_mean"] = (
+                    (cluster["base_y_mean"] * (n_items - 1) + det_y) / n_items
+                )
+            else:
+                clusters.append(
+                    {
+                        "items": [det],
+                        "frame_ids": {int(det["frame_idx"])},
+                        "center_x_mean": det_x,
+                        "base_y_mean": det_y,
+                    }
+                )
+
+        confirmed = []
+        for cluster in clusters:
+            items = cluster["items"]
+            support = len(cluster["frame_ids"])
+            confs = [float(item.get("confidence", 0.0)) for item in items]
+            med_conf = float(np.median(confs)) if confs else 0.0
+            if support < min_support or med_conf < float(conf):
+                continue
+
+            class_counts = {}
+            for item in items:
+                cls = int(item.get("class", 0))
+                class_counts[cls] = class_counts.get(cls, 0) + 1
+            best_class = sorted(class_counts.items(), key=lambda p: (-p[1], p[0]))[0][0]
+
+            name_counts = {}
+            for item in items:
+                if int(item.get("class", 0)) != best_class:
+                    continue
+                name = str(item.get("class_name", "gate"))
+                name_counts[name] = name_counts.get(name, 0) + 1
+            best_name = sorted(name_counts.items(), key=lambda p: (-p[1], p[0]))[0][0]
+
+            confirmed.append(
+                {
+                    "class": int(best_class),
+                    "class_name": best_name,
+                    "center_x": float(np.median([float(item.get("center_x", 0.0)) for item in items])),
+                    "base_y": float(np.median([float(item.get("base_y", 0.0)) for item in items])),
+                    "confidence": med_conf,
+                }
+            )
+
+        confirmed.sort(key=lambda g: (float(g["base_y"]), float(g["center_x"])))
+        print(
+            f"         Consensus gate init: {len(confirmed)} confirmed clusters "
+            f"from {len(clusters)} raw clusters ({sampled_frames} sampled frames)"
+        )
+
+        if len(confirmed) < 2:
+            print("         Consensus fallback: using single best frame search")
+            return self.detect_from_best_frame(
+                video_path,
+                conf=conf,
+                iou=iou,
+                max_frames=max_frames,
+                stride=stride,
+            )
+        return confirmed
 
 
 class TemporalGateTracker:
@@ -481,3 +627,320 @@ def emission_log_prob(class_label: str, conf_class: float) -> Dict[str, float]:
         "log_prob_blue": min(0.0, float(log_blue)),
         "log_prob_dnf":  min(0.0, float(log_dnf)),
     }
+
+
+class CourseGateCounter:
+    """
+    Full-video gate counter that spawns new tracks for unmatched detections.
+
+    Unlike TemporalGateTracker (which only tracks seeded gates), this class
+    runs a separate full-video pass and can discover gates that first appear
+    mid-video, then merges fragments and deduplicates.
+    """
+
+    def __init__(
+        self,
+        detector,
+        conf=0.20,
+        iou=0.45,
+        stride=2,
+        min_hits=3,
+        track_missing_max=8,
+        match_thresh_ratio=0.06,
+        match_thresh_min=24.0,
+        fragment_merge_gap_max=45,
+        fragment_merge_dist_ratio=0.10,
+        dedup_dx_ratio=0.03,
+        dedup_dy_ratio=0.05,
+        dedup_overlap_thresh=0.50,
+    ):
+        self.detector = detector
+        self.conf = float(conf)
+        self.iou = float(iou)
+        self.stride = max(1, int(stride))
+        self.min_hits = max(1, int(min_hits))
+        self.track_missing_max = max(1, int(track_missing_max))
+        self.match_thresh_ratio = float(match_thresh_ratio)
+        self.match_thresh_min = float(match_thresh_min)
+        self.fragment_merge_gap_max = max(1, int(fragment_merge_gap_max))
+        self.fragment_merge_dist_ratio = float(fragment_merge_dist_ratio)
+        self.dedup_dx_ratio = float(dedup_dx_ratio)
+        self.dedup_dy_ratio = float(dedup_dy_ratio)
+        self.dedup_overlap_thresh = float(dedup_overlap_thresh)
+
+    def count(self, video_path, frame_width, frame_height):
+        """
+        Run full-video gate counting pipeline.
+
+        Returns:
+            dict with keys: course_gates, course_gates_count, diagnostics
+        """
+        samples = self._pass_a_sample_detections(video_path)
+        match_thresh = max(self.match_thresh_min, self.match_thresh_ratio * frame_width)
+        finished_tracks, raw_track_count = self._pass_b_associate(samples, match_thresh)
+        filtered = self._pass_c_filter(finished_tracks)
+        merged, merged_pairs = self._pass_d_merge_fragments(
+            filtered, frame_width, frame_height
+        )
+        final, dedup_drops = self._pass_e_dedup(merged, frame_width, frame_height)
+
+        course_gates = []
+        for s in final:
+            course_gates.append({
+                "center_x": float(s["center_x"]),
+                "base_y": float(s["base_y"]),
+                "class": int(s["class"]),
+                "class_name": str(s["class_name"]),
+                "confidence": float(s["conf_median"]),
+                "hits": int(s["hits"]),
+                "frame_start": int(s["frame_start"]),
+                "frame_end": int(s["frame_end"]),
+            })
+
+        return {
+            "course_gates": course_gates,
+            "course_gates_count": len(course_gates),
+            "diagnostics": {
+                "raw_tracks": raw_track_count,
+                "after_filter": len(filtered),
+                "merged_pairs": merged_pairs,
+                "dedup_drops": dedup_drops,
+                "params_used": {
+                    "conf": self.conf,
+                    "iou": self.iou,
+                    "stride": self.stride,
+                    "min_hits": self.min_hits,
+                    "track_missing_max": self.track_missing_max,
+                    "match_thresh_ratio": self.match_thresh_ratio,
+                    "match_thresh_min": self.match_thresh_min,
+                    "fragment_merge_gap_max": self.fragment_merge_gap_max,
+                    "fragment_merge_dist_ratio": self.fragment_merge_dist_ratio,
+                    "dedup_dx_ratio": self.dedup_dx_ratio,
+                    "dedup_dy_ratio": self.dedup_dy_ratio,
+                    "dedup_overlap_thresh": self.dedup_overlap_thresh,
+                },
+            },
+        }
+
+    def _pass_a_sample_detections(self, video_path):
+        """Pass A: Read every stride-th frame and run detection."""
+        import cv2
+        cap = cv2.VideoCapture(str(video_path))
+        samples = []
+        frame_idx = 0
+        sample_idx = 0
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % self.stride == 0:
+                dets = self.detector.detect_in_frame(frame, conf=self.conf, iou=self.iou)
+                samples.append((sample_idx, frame_idx, dets))
+                sample_idx += 1
+            frame_idx += 1
+        cap.release()
+        return samples
+
+    def _pass_b_associate(self, samples, match_thresh):
+        """
+        Pass B: Online association with track spawning.
+
+        Key difference from TemporalGateTracker: unmatched detections spawn
+        new tracks.
+
+        Returns:
+            (finished_tracks, raw_track_count)
+        """
+        active_tracks = []
+        finished_tracks = []
+        next_id = 0
+
+        for sample_idx, frame_idx, dets in samples:
+            matched_det_indices = set()
+
+            # Tracks-outer, detections-inner (same order as TemporalGateTracker)
+            for track in active_tracks:
+                best_det_idx = None
+                best_dist = float("inf")
+                # Use last known position for matching
+                track_cx = track["center_x_list"][-1]
+                track_by = track["base_y_list"][-1]
+                for i, det in enumerate(dets):
+                    if i in matched_det_indices:
+                        continue
+                    dx = track_cx - det["center_x"]
+                    dy = track_by - det["base_y"]
+                    dist = (dx * dx + dy * dy) ** 0.5
+                    if dist < match_thresh and dist < best_dist:
+                        best_dist = dist
+                        best_det_idx = i
+                if best_det_idx is not None:
+                    det = dets[best_det_idx]
+                    track["center_x_list"].append(float(det["center_x"]))
+                    track["base_y_list"].append(float(det["base_y"]))
+                    track["conf_list"].append(float(det["confidence"]))
+                    track["class_list"].append(int(det["class"]))
+                    track["frame_end"] = frame_idx
+                    track["hits"] += 1
+                    track["missing_samples"] = 0
+                    matched_det_indices.add(best_det_idx)
+                else:
+                    track["missing_samples"] += 1
+
+            # Drop tracks that exceeded missing limit
+            still_active = []
+            for track in active_tracks:
+                if track["missing_samples"] > self.track_missing_max:
+                    finished_tracks.append(track)
+                else:
+                    still_active.append(track)
+            active_tracks = still_active
+
+            # Spawn new tracks for unmatched detections
+            for i, det in enumerate(dets):
+                if i in matched_det_indices:
+                    continue
+                if det["confidence"] >= self.conf:
+                    active_tracks.append({
+                        "track_id": next_id,
+                        "center_x_list": [float(det["center_x"])],
+                        "base_y_list": [float(det["base_y"])],
+                        "conf_list": [float(det["confidence"])],
+                        "class_list": [int(det["class"])],
+                        "frame_start": frame_idx,
+                        "frame_end": frame_idx,
+                        "hits": 1,
+                        "missing_samples": 0,
+                    })
+                    next_id += 1
+
+        # Flush remaining active tracks
+        finished_tracks.extend(active_tracks)
+        return finished_tracks, next_id
+
+    def _pass_c_filter(self, tracks):
+        """Pass C: Keep tracks with enough hits and adequate confidence."""
+        filtered = []
+        for track in tracks:
+            if track["hits"] < self.min_hits:
+                continue
+            conf_median = float(np.median(track["conf_list"]))
+            if conf_median < self.conf:
+                continue
+            # Determine best class by mode
+            class_counts = {}
+            for c in track["class_list"]:
+                class_counts[c] = class_counts.get(c, 0) + 1
+            best_class = max(class_counts, key=class_counts.get)
+            # Look up class name from detector model
+            class_name = self.detector.model.names.get(best_class, "gate")
+            filtered.append({
+                "track_id": track["track_id"],
+                "center_x": float(np.median(track["center_x_list"])),
+                "base_y": float(np.median(track["base_y_list"])),
+                "conf_median": conf_median,
+                "class": int(best_class),
+                "class_name": str(class_name),
+                "hits": track["hits"],
+                "frame_start": track["frame_start"],
+                "frame_end": track["frame_end"],
+            })
+        return filtered
+
+    def _pass_d_merge_fragments(self, summaries, frame_width, frame_height):
+        """Pass D: Merge track fragments with time gap and spatial proximity."""
+        merged_pairs = 0
+        max_dim = max(frame_width, frame_height)
+        merge_dist = self.fragment_merge_dist_ratio * max_dim
+
+        changed = True
+        while changed:
+            changed = False
+            summaries = sorted(summaries, key=lambda s: s["frame_start"])
+            new_summaries = list(summaries)
+            merged_indices = set()
+            for i in range(len(summaries)):
+                if i in merged_indices:
+                    continue
+                for j in range(i + 1, len(summaries)):
+                    if j in merged_indices:
+                        continue
+                    si, sj = summaries[i], summaries[j]
+                    # Time gap check
+                    if si["frame_end"] >= sj["frame_start"]:
+                        continue  # overlapping, not a fragment gap
+                    gap = sj["frame_start"] - si["frame_end"]
+                    if gap > self.fragment_merge_gap_max:
+                        continue
+                    # Spatial proximity
+                    dx = abs(si["center_x"] - sj["center_x"])
+                    dy = abs(si["base_y"] - sj["base_y"])
+                    dist = (dx * dx + dy * dy) ** 0.5
+                    if dist > merge_dist:
+                        continue
+                    # Same class
+                    if si["class"] != sj["class"]:
+                        continue
+                    # Merge: weighted position by hits
+                    total_hits = si["hits"] + sj["hits"]
+                    merged = {
+                        "track_id": si["track_id"],
+                        "center_x": (si["center_x"] * si["hits"] + sj["center_x"] * sj["hits"]) / total_hits,
+                        "base_y": (si["base_y"] * si["hits"] + sj["base_y"] * sj["hits"]) / total_hits,
+                        "conf_median": (si["conf_median"] * si["hits"] + sj["conf_median"] * sj["hits"]) / total_hits,
+                        "class": si["class"],
+                        "class_name": si["class_name"],
+                        "hits": total_hits,
+                        "frame_start": min(si["frame_start"], sj["frame_start"]),
+                        "frame_end": max(si["frame_end"], sj["frame_end"]),
+                    }
+                    # Replace i with merged, mark j
+                    idx_i = new_summaries.index(si)
+                    new_summaries[idx_i] = merged
+                    new_summaries.remove(sj)
+                    merged_indices.add(j)
+                    merged_pairs += 1
+                    changed = True
+                    break
+                if changed:
+                    break
+            if changed:
+                summaries = new_summaries
+        return summaries, merged_pairs
+
+    def _pass_e_dedup(self, summaries, frame_width, frame_height):
+        """Pass E: Suppress duplicate tracks with spatial and temporal overlap."""
+        dedup_drops = 0
+        dx_thresh = self.dedup_dx_ratio * frame_width
+        dy_thresh = self.dedup_dy_ratio * frame_height
+
+        changed = True
+        while changed:
+            changed = False
+            for i in range(len(summaries)):
+                for j in range(i + 1, len(summaries)):
+                    si, sj = summaries[i], summaries[j]
+                    if abs(si["center_x"] - sj["center_x"]) > dx_thresh:
+                        continue
+                    if abs(si["base_y"] - sj["base_y"]) > dy_thresh:
+                        continue
+                    # Temporal overlap ratio
+                    overlap_start = max(si["frame_start"], sj["frame_start"])
+                    overlap_end = min(si["frame_end"], sj["frame_end"])
+                    overlap = max(0, overlap_end - overlap_start)
+                    dur_i = max(1, si["frame_end"] - si["frame_start"])
+                    dur_j = max(1, sj["frame_end"] - sj["frame_start"])
+                    overlap_ratio = overlap / min(dur_i, dur_j)
+                    if overlap_ratio <= self.dedup_overlap_thresh:
+                        continue
+                    # Drop the one with fewer hits
+                    if si["hits"] >= sj["hits"]:
+                        summaries.pop(j)
+                    else:
+                        summaries.pop(i)
+                    dedup_drops += 1
+                    changed = True
+                    break
+                if changed:
+                    break
+        return summaries, dedup_drops

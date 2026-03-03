@@ -191,12 +191,13 @@ def read_ground_truth_boxes(label_path, image_width, image_height):
     return boxes
 
 
-def collect_predictions(model, image_paths, conf_min, nms_iou):
+def collect_predictions(model, image_paths, conf_min, nms_iou, imgsz=960):
     results = {}
     stream = model.predict(
         source=[str(path) for path in image_paths],
         conf=conf_min,
         iou=nms_iou,
+        imgsz=imgsz,
         save=False,
         verbose=False,
         stream=True,
@@ -219,6 +220,47 @@ def collect_predictions(model, image_paths, conf_min, nms_iou):
         results[image_name] = detections
 
     return results
+
+
+def _ensemble_nms(dets_a, dets_b, iou_thresh=0.50):
+    """Merge detections from two models and suppress duplicates."""
+    merged = list(dets_a) + list(dets_b)
+    merged.sort(key=lambda d: d["confidence"], reverse=True)
+    keep = []
+    for det in merged:
+        suppress = False
+        for kept in keep:
+            if box_iou(det["bbox"], kept["bbox"]) > iou_thresh:
+                suppress = True
+                break
+        if not suppress:
+            keep.append(det)
+    return keep
+
+
+def collect_ensemble_predictions(
+    model_paths, image_paths, conf_min, nms_iou, ensemble_nms_iou=0.50, imgsz=960
+):
+    """Run multiple models and merge predictions with NMS."""
+    per_model = []
+    for model_path in model_paths:
+        model = YOLO(str(model_path))
+        preds = collect_predictions(model, image_paths, conf_min, nms_iou, imgsz=imgsz)
+        per_model.append(preds)
+
+    if len(per_model) == 1:
+        return per_model[0]
+
+    merged = {}
+    all_names = set()
+    for preds in per_model:
+        all_names.update(preds.keys())
+    for name in all_names:
+        combined = []
+        for preds in per_model:
+            combined = _ensemble_nms(combined, preds.get(name, []), iou_thresh=ensemble_nms_iou)
+        merged[name] = combined
+    return merged
 
 
 def greedy_match(predictions, ground_truth_boxes, iou_threshold=0.5):
@@ -256,6 +298,9 @@ def run_holdout_evaluation(
     match_iou=0.50,
     nms_iou=0.55,
     default_threshold=0.35,
+    ensemble_model_paths=None,
+    ensemble_nms_iou=0.50,
+    imgsz=960,
 ):
     thresholds = sorted(set(thresholds or DEFAULT_THRESHOLDS))
     images_dir, labels_dir = resolve_dataset_split(data_path)
@@ -264,13 +309,28 @@ def run_holdout_evaluation(
     if not image_paths:
         raise ValueError(f"No images found in {images_dir}")
 
-    model = YOLO(str(model_path))
-    predictions_by_image = collect_predictions(
-        model=model,
-        image_paths=image_paths,
-        conf_min=min(thresholds),
-        nms_iou=nms_iou,
-    )
+    all_model_paths = [str(model_path)]
+    if ensemble_model_paths:
+        all_model_paths.extend(str(p) for p in ensemble_model_paths)
+
+    if len(all_model_paths) > 1:
+        predictions_by_image = collect_ensemble_predictions(
+            model_paths=all_model_paths,
+            image_paths=image_paths,
+            conf_min=min(thresholds),
+            nms_iou=nms_iou,
+            ensemble_nms_iou=ensemble_nms_iou,
+            imgsz=imgsz,
+        )
+    else:
+        model = YOLO(str(model_path))
+        predictions_by_image = collect_predictions(
+            model=model,
+            image_paths=image_paths,
+            conf_min=min(thresholds),
+            nms_iou=nms_iou,
+            imgsz=imgsz,
+        )
 
     per_threshold = {}
     total_instances = 0
@@ -337,6 +397,8 @@ def run_holdout_evaluation(
     result = {
         "mode": "holdout_iou",
         "model": str(model_path),
+        "ensemble_models": [str(p) for p in all_model_paths] if len(all_model_paths) > 1 else None,
+        "ensemble_nms_iou": float(ensemble_nms_iou) if len(all_model_paths) > 1 else None,
         "data": str(data_path),
         "resolved_split": {
             "images_dir": str(images_dir),

@@ -33,6 +33,9 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v"}
 METRIC_SPECS = {
     "gates_detected": {"label": "Gates detected", "direction": "higher"},
     "trajectory_coverage": {"label": "Trajectory coverage", "direction": "higher"},
+    "confirmed_gate_count": {"label": "Confirmed gate count", "direction": "higher"},
+    "ghost_gate_count_raw": {"label": "Ghost gate count (raw)", "direction": "lower"},
+    "gate_interp_rate": {"label": "Gate interpolation rate", "direction": "lower"},
     "track_id_switches": {"label": "Track ID switches", "direction": "lower"},
     "p90_speed_kmh": {"label": "P90 speed (km/h)", "direction": "lower"},
     "max_speed_kmh": {"label": "Max speed (km/h)", "direction": "lower"},
@@ -40,6 +43,7 @@ METRIC_SPECS = {
     "max_jump_m": {"label": "Max jump (m)", "direction": "lower"},
     "auto_cal_correction": {"label": "Auto-cal correction", "direction": "lower"},
     "physics_issue_count": {"label": "Physics issue count", "direction": "lower"},
+    "course_gates_count": {"label": "Course gates count", "direction": "higher"},
 }
 
 
@@ -91,11 +95,13 @@ def load_regression_config(config_path):
     defaults = {
         "gate_conf": 0.35,
         "gate_iou": 0.55,
-        "stabilize": True,
+        "stabilize": True,  # deprecated compatibility key (remove after 2026-04-30)
         # camera_mode and projection removed — 2D-first pipeline no longer uses them.
         # Old YAML files that still contain these keys will have them loaded into the
         # config dict (no parse error) but they will not be forwarded to the pipeline.
         "discipline": "slalom",
+        "gate_init_mode": "single_best",
+        "gate_consensus_min_support": 3,
         "skier_conf": 0.25,
         "gate_search_frames": 150,
         "gate_search_stride": 5,
@@ -173,6 +179,7 @@ def extract_stage2_metrics(video_id, video_path, analysis_path, results):
     g_forces = metrics.get("g_forces") or {}
     smoothness = metrics.get("smoothness") or {}
     auto_calibration = results.get("auto_calibration") or {}
+    gate_tracking_quality = results.get("gate_tracking_quality") or {}
 
     total_frames = int((results.get("video_info") or {}).get("total_frames") or 0)
     tracked_frames = len(results.get("trajectory_2d") or [])
@@ -187,6 +194,10 @@ def extract_stage2_metrics(video_id, video_path, analysis_path, results):
         "video_file": video_path.name,
         "analysis_json": str(analysis_path),
         "gates_detected": int(len(results.get("gates") or [])),
+        "confirmed_gate_count": int(gate_tracking_quality.get("confirmed_gate_count", 0)),
+        "ghost_gate_count_raw": int(gate_tracking_quality.get("ghost_gate_count_raw", 0)),
+        "gate_interp_rate": safe_float(gate_tracking_quality.get("interp_rate_overall"), 0.0),
+        "provisional_dropped_count": int(gate_tracking_quality.get("provisional_dropped_count", 0)),
         "trajectory_coverage": float(coverage),
         "tracked_frames": tracked_frames,
         "total_frames": total_frames,
@@ -198,6 +209,7 @@ def extract_stage2_metrics(video_id, video_path, analysis_path, results):
         "auto_cal_correction": safe_float(correction, 1.0),
         "auto_cal_applied": bool(auto_calibration.get("applied", False)),
         "physics_issue_count": int(len(physics.get("issues") or [])),
+        "course_gates_count": int(results.get("course_gates_count") or 0),
     }
 
 
@@ -205,6 +217,10 @@ def aggregate_stage2(per_video):
     return {
         "videos": int(len(per_video)),
         "gates_detected": safe_mean([row["gates_detected"] for row in per_video]),
+        "confirmed_gate_count": safe_mean([row["confirmed_gate_count"] for row in per_video]),
+        "ghost_gate_count_raw": safe_mean([row["ghost_gate_count_raw"] for row in per_video]),
+        "gate_interp_rate": safe_mean([row["gate_interp_rate"] for row in per_video]),
+        "provisional_dropped_count": safe_mean([row["provisional_dropped_count"] for row in per_video]),
         "trajectory_coverage": safe_mean([row["trajectory_coverage"] for row in per_video]),
         "track_id_switches": safe_mean([row["track_id_switches"] for row in per_video]),
         "p90_speed_kmh": safe_mean([row["p90_speed_kmh"] for row in per_video]),
@@ -213,6 +229,7 @@ def aggregate_stage2(per_video):
         "max_jump_m": safe_mean([row["max_jump_m"] for row in per_video]),
         "auto_cal_correction": safe_mean([row["auto_cal_correction"] for row in per_video]),
         "physics_issue_count": safe_mean([row["physics_issue_count"] for row in per_video]),
+        "course_gates_count": safe_mean([row["course_gates_count"] for row in per_video]),
     }
 
 
@@ -250,6 +267,13 @@ def extract_baseline_summary(baseline_payload):
     if isinstance(stage2_source, dict):
         alias_map = {
             "gates_detected": ("gates_detected", "avg_gates_detected"),
+            "confirmed_gate_count": ("confirmed_gate_count", "avg_confirmed_gate_count"),
+            "ghost_gate_count_raw": ("ghost_gate_count_raw", "avg_ghost_gate_count_raw"),
+            "gate_interp_rate": ("gate_interp_rate", "avg_gate_interp_rate"),
+            "provisional_dropped_count": (
+                "provisional_dropped_count",
+                "avg_provisional_dropped_count",
+            ),
             "trajectory_coverage": ("trajectory_coverage", "avg_traj_coverage"),
             "p90_speed_kmh": ("p90_speed_kmh", "avg_speed_p90_kmh"),
             "max_speed_kmh": ("max_speed_kmh", "avg_speed_max_kmh"),
@@ -257,6 +281,7 @@ def extract_baseline_summary(baseline_payload):
             "max_jump_m": ("max_jump_m", "avg_max_jump_m"),
             "auto_cal_correction": ("auto_cal_correction", "avg_auto_calibration_correction"),
             "physics_issue_count": ("physics_issue_count", "avg_physics_issue_count"),
+            "course_gates_count": ("course_gates_count",),
         }
         for metric_name, aliases in alias_map.items():
             for alias in aliases:
@@ -476,7 +501,7 @@ def parse_args():
 
     parser.add_argument(
         "--data",
-        default="data/annotations/final_combined_1class_20260213/test",
+        default="data/datasets/final_combined_1class_20260226_curated/test",
         help="Holdout split path (or data.yaml)",
     )
     parser.add_argument(
@@ -518,6 +543,29 @@ def parse_args():
         default=0.55,
         help="NMS IoU threshold used for Stage 1 inference",
     )
+    parser.add_argument(
+        "--ensemble-models",
+        default=None,
+        help="Comma-separated additional model paths for ensemble evaluation",
+    )
+    parser.add_argument(
+        "--ensemble-nms-iou",
+        type=float,
+        default=0.50,
+        help="NMS IoU threshold for merging ensemble detections",
+    )
+    parser.add_argument(
+        "--imgsz",
+        type=int,
+        default=960,
+        help="Inference image size (should match training size)",
+    )
+    parser.add_argument(
+        "--min-f1",
+        type=float,
+        default=0.80,
+        help="Minimum F1 threshold for PASS verdict (default 0.80)",
+    )
     return parser.parse_args()
 
 
@@ -545,6 +593,15 @@ def main():
 
     print(f"[INFO] Report directory: {report_dir}")
 
+    # Parse ensemble models
+    ensemble_model_paths = None
+    if args.ensemble_models:
+        ensemble_model_paths = [
+            str(resolve_path(p.strip()))
+            for p in args.ensemble_models.split(",")
+            if p.strip()
+        ]
+
     # Stage 1
     print("[INFO] Stage 1/3 - Holdout detection metrics")
     stage1_path = report_dir / "stage1_holdout.json"
@@ -556,7 +613,18 @@ def main():
         match_iou=float(args.match_iou),
         nms_iou=float(args.nms_iou),
         default_threshold=float(args.default_threshold),
+        ensemble_model_paths=ensemble_model_paths,
+        ensemble_nms_iou=float(args.ensemble_nms_iou),
+        imgsz=int(args.imgsz),
     )
+
+    # F1 gate check
+    stage1_f1 = safe_float((stage1_result.get("summary") or {}).get("f1"), 0.0)
+    min_f1 = float(args.min_f1)
+    if stage1_f1 < min_f1:
+        print(f"[WARN] Stage 1 F1 = {stage1_f1:.4f} < {min_f1:.2f} minimum threshold")
+    else:
+        print(f"[INFO] Stage 1 F1 = {stage1_f1:.4f} >= {min_f1:.2f} threshold PASS")
 
     # Stage 2
     print("[INFO] Stage 2/3 - 3-video regression")
@@ -573,9 +641,14 @@ def main():
     _run_params = set(inspect.signature(SkiRacingPipeline.process_video).parameters) - {"self"}
 
     init_kwargs = {"gate_model_path": str(model_path)}
+    _stab = regression_config.get("stabilize", False)  # legacy fallback
     config_init_kwargs = {
         "discipline": str(regression_config["discipline"]),
-        "stabilize": bool(regression_config["stabilize"]),
+        "gate_init_mode": str(regression_config.get("gate_init_mode", "single_best")),
+        "gate_consensus_min_support": int(regression_config.get("gate_consensus_min_support", 3)),
+        "gate_full_track": bool(regression_config.get("gate_full_track", _stab)),
+        "outlier_filter": bool(regression_config.get("outlier_filter", _stab)),
+        "kalman_smooth": bool(regression_config.get("kalman_smooth", _stab)),
     }
     for key, value in config_init_kwargs.items():
         if key not in _init_params:
@@ -651,6 +724,14 @@ def main():
     # Stage 3
     print("[INFO] Stage 3/3 - Summary + verdict")
     comparison = compare_against_baseline(stage1_result, stage2_result, baseline_payload)
+
+    # Apply F1 minimum gate regardless of baseline
+    if stage1_f1 < min_f1:
+        comparison["status"] = "FAIL"
+        comparison["reasons"].append(
+            f"F1 ({stage1_f1:.4f}) below minimum threshold ({min_f1:.2f})."
+        )
+
     git_commit = get_git_commit()
     summary_path = render_summary(
         report_dir=report_dir,

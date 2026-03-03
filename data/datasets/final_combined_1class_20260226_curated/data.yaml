@@ -1,0 +1,13 @@
+# Curated dataset for 2D-first sprint (2026-02-26)
+# Base: final_combined_1class_20260215_hardfix (260 annotated train images)
+# Added: 50 hard-negatives from orig dataset + 50 from regression videos
+# Fixed: 3 h>=1.0 bboxes clamped to h=0.98
+# Train: 360 images (260 annotated=72%, 100 hard-neg=28%)
+# Valid: 72 images (100% annotated)
+# Test:  26 images (100% annotated)
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 1
+names: ['gate']

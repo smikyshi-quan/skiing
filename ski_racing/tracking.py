@@ -500,6 +500,7 @@ class SkierTracker:
         max_frames=None,
         max_jump=None,
         conf=0.25,
+        gates=None,
     ):
         """
         Track skier through an entire video.
@@ -510,6 +511,10 @@ class SkierTracker:
             frame_stride: Process every Nth frame (temporal mode only).
             max_frames: Optional max number of frames to process from start.
             max_jump: Max pixel jump allowed between frames (temporal mode only).
+            conf: Person detection confidence threshold.
+            gates: Optional list of gate detections (static). When provided,
+                tracking is biased toward the course centerline implied by gates
+                to reduce switching to spectators/course workers.
 
         Returns:
             List of trajectory points: [{"frame": int, "x": float, "y": float}, ...]
@@ -520,6 +525,7 @@ class SkierTracker:
                     video_path,
                     conf=conf,
                     max_jump=max_jump,
+                    gates=gates,
                 )
                 return trajectory
             except ModuleNotFoundError as e:
@@ -566,13 +572,76 @@ class SkierTracker:
             self._last_tracking_stats["selected_method"] = "temporal"
             return trajectory
 
-    def _track_with_bytetrack_reassociate(self, video_path, conf=0.25, max_jump=None,
-                                          max_gap=30, reacquire_gap=15):
+    @staticmethod
+    def _build_course_centerline(gates):
+        """
+        Build a simple course centerline x(y) function from static gate detections.
+
+        Uses gate center_x vs base_y, linearly interpolated in y.
+        Returns None when there isn't enough usable gate data.
+        """
+        if not gates:
+            return None
+        pts = []
+        for g in gates:
+            if not isinstance(g, dict):
+                continue
+            if "center_x" not in g or "base_y" not in g:
+                continue
+            try:
+                pts.append((float(g["base_y"]), float(g["center_x"])))
+            except Exception:
+                continue
+        if len(pts) < 2:
+            return None
+        pts.sort(key=lambda t: t[0])
+        ys = np.array([p[0] for p in pts], dtype=np.float64)
+        xs = np.array([p[1] for p in pts], dtype=np.float64)
+
+        # Drop nearly-duplicate y points to keep interpolation stable.
+        keep = [0]
+        for i in range(1, len(ys)):
+            if abs(float(ys[i]) - float(ys[keep[-1]])) >= 2.0:
+                keep.append(i)
+        ys = ys[keep]
+        xs = xs[keep]
+        if len(ys) < 2:
+            return None
+
+        def x_at_y(y):
+            y = float(y)
+            if y <= float(ys[0]):
+                return float(xs[0])
+            if y >= float(ys[-1]):
+                return float(xs[-1])
+            j = int(np.searchsorted(ys, y, side="right"))
+            y0, y1 = float(ys[j - 1]), float(ys[j])
+            x0, x1 = float(xs[j - 1]), float(xs[j])
+            t = (y - y0) / (y1 - y0) if y1 > y0 else 0.5
+            return float(x0 + t * (x1 - x0))
+
+        def lateral_error_px(x, y):
+            return abs(float(x) - x_at_y(y))
+
+        return {"x_at_y": x_at_y, "lateral_error_px": lateral_error_px}
+
+    def _track_with_bytetrack_reassociate(
+        self,
+        video_path,
+        conf=0.25,
+        max_jump=None,
+        gates=None,
+        max_gap=30,
+        reacquire_gap=15,
+    ):
         """
         Use YOLOv8's built-in ByteTrack detections but reassociate
         targets frame-to-frame to avoid ID switches truncating the run.
         """
         trajectory = []
+        centerline = self._build_course_centerline(gates)
+        gate_corridor_max_ratio = 0.35
+        gate_lateral_weight = 0.70
 
         # Run tracking with persistence
         results = self.model.track(
@@ -594,6 +663,8 @@ class SkierTracker:
         track_id_switches = 0
         track_id_changes_observed = 0
         observed_frames = 0
+        track_id_counts = {}
+        primary_track_id = None
 
         for frame_idx, result in enumerate(results):
             observed_frames += 1
@@ -636,27 +707,74 @@ class SkierTracker:
             else:
                 max_jump_px = float(max_jump)
 
+            if centerline is not None and last_pos is not None:
+                corridor_max_px = float(gate_corridor_max_ratio) * float(w)
+                in_course = [
+                    det for det in detections
+                    if centerline["lateral_error_px"](det["x"], det["y"]) <= corridor_max_px
+                ]
+                if in_course:
+                    detections = in_course
+                else:
+                    # No plausible on-course detections: treat as missing rather than
+                    # latching onto spectators far from the gate corridor.
+                    missing += 1
+                    if missing > max_gap:
+                        last_pos = None
+                        last_vel = (0.0, 0.0)
+                        last_frame = None
+                        last_area = None
+                        last_track_id = None
+                    continue
+
             chosen = None
             if last_pos is None:
-                # First frame: choose detection closest to center
-                cx, cy = w / 2.0, h / 2.0
-                best = None
-                best_dist = float("inf")
-                for det in detections:
-                    dist = ((det["x"] - cx) ** 2 + (det["y"] - cy) ** 2) ** 0.5
-                    if dist < best_dist:
-                        best_dist = dist
-                        best = det
-                chosen = best
+                # First frame: gate-guided initialization when available.
+                if centerline is not None:
+                    corridor_max_px = float(gate_corridor_max_ratio) * float(w)
+                    best = None
+                    best_score = float("inf")
+                    for det in detections:
+                        lat = centerline["lateral_error_px"](det["x"], det["y"])
+                        if lat > corridor_max_px:
+                            continue
+                        prominence = (det["area"] ** 0.5) * det["confidence"]
+                        # Lower is better: stay on-course, prefer confident/large targets.
+                        score = float(lat) - 1.25 * float(prominence)
+                        if score < best_score:
+                            best_score = score
+                            best = det
+                    chosen = best
+
+                if chosen is None:
+                    # Fallback: choose detection closest to center
+                    cx, cy = w / 2.0, h / 2.0
+                    best = None
+                    best_dist = float("inf")
+                    for det in detections:
+                        dist = ((det["x"] - cx) ** 2 + (det["y"] - cy) ** 2) ** 0.5
+                        if dist < best_dist:
+                            best_dist = dist
+                            best = det
+                    chosen = best
             else:
                 gap = max(1, frame_idx - (last_frame if last_frame is not None else frame_idx))
                 pred_x = last_pos[0] + last_vel[0] * gap
                 pred_y = last_pos[1] + last_vel[1] * gap
+                corridor_max_px = (
+                    float(gate_corridor_max_ratio) * float(w)
+                    if centerline is not None
+                    else None
+                )
 
                 if last_track_id is not None:
                     for det in detections:
                         if det.get("track_id") != last_track_id:
                             continue
+                        if corridor_max_px is not None:
+                            lat = centerline["lateral_error_px"](det["x"], det["y"])
+                            if lat > corridor_max_px:
+                                continue
                         dist_same = ((det["x"] - pred_x) ** 2 + (det["y"] - pred_y) ** 2) ** 0.5
                         if dist_same <= max_jump_px * gap:
                             chosen = det
@@ -667,25 +785,69 @@ class SkierTracker:
                 else:
                     best = None
                     best_dist = float("inf")
+                    best_any = None
+                    best_any_dist = float("inf")
                     for det in detections:
                         dist = ((det["x"] - pred_x) ** 2 + (det["y"] - pred_y) ** 2) ** 0.5
+                        in_course = True
+                        if centerline is not None:
+                            lat = centerline["lateral_error_px"](det["x"], det["y"])
+                            dist += gate_lateral_weight * lat
+                            # Soft guardrail: if we have on-course candidates, avoid extremely off-course ones.
+                            in_course = lat <= 0.55 * w
+                        det_id = det.get("track_id")
+                        if primary_track_id is not None and det_id is not None and det_id != primary_track_id:
+                            dist += 150.0
+                        # Penalize implausible uphill jumps (helps avoid switching to spectators).
+                        if det["y"] < last_pos[1] - 0.08 * h:
+                            dist += 10_000.0
+                        if dist < best_any_dist:
+                            best_any_dist = dist
+                            best_any = det
                         if dist < best_dist:
-                            best_dist = dist
-                            best = det
+                            if in_course:
+                                best_dist = dist
+                                best = det
+
+                    if best is None:
+                        best = best_any
+                        best_dist = best_any_dist
 
                     if best is not None and best_dist <= max_jump_px * gap:
                         chosen = best
                     elif gap > reacquire_gap:
-                        # Reacquire: choose most prominent detection
+                        # Reacquire: favor on-course detections and predicted continuity.
                         best = None
-                        best_score = -float("inf")
+                        best_score = float("inf")
+                        best_any = None
+                        best_any_score = float("inf")
                         for det in detections:
-                            score = (det["area"] ** 0.5) * det["confidence"]  # area^0.5 * conf
-                            if score > best_score:
-                                best_score = score
-                                best = det
+                            prominence = (det["area"] ** 0.5) * det["confidence"]
+                            dist_pred = ((det["x"] - pred_x) ** 2 + (det["y"] - pred_y) ** 2) ** 0.5
+                            in_course = True
+                            lat = 0.0
+                            if centerline is not None:
+                                lat = centerline["lateral_error_px"](det["x"], det["y"])
+                                in_course = lat <= 0.55 * w
+                            score = dist_pred + gate_lateral_weight * lat - 1.5 * prominence
+                            det_id = det.get("track_id")
+                            if primary_track_id is not None and det_id is not None and det_id != primary_track_id:
+                                score += 150.0
+                            if det["y"] < last_pos[1] - 0.08 * h:
+                                score += 10_000.0
+                            if score < best_any_score:
+                                best_any_score = score
+                                best_any = det
+                            if score < best_score:
+                                if in_course:
+                                    best_score = score
+                                    best = det
+
+                        if best is None:
+                            best = best_any
                         if best is not None:
-                            within_pred = ((best["x"] - pred_x) ** 2 + (best["y"] - pred_y) ** 2) ** 0.5 <= 200.0
+                            dist = ((best["x"] - pred_x) ** 2 + (best["y"] - pred_y) ** 2) ** 0.5
+                            within_pred = dist <= max(200.0, 0.30 * max(w, h) * min(gap, 10))
                             if last_area is not None and last_area > 1e-6:
                                 area_ratio = best["area"] / last_area
                                 within_size = 0.5 <= area_ratio <= 1.5
@@ -706,6 +868,25 @@ class SkierTracker:
             if chosen is None:
                 missing += 1
                 continue
+            if centerline is not None:
+                corridor_max_px = float(gate_corridor_max_ratio) * float(w)
+                # If there are any plausible on-course detections this frame,
+                # reject off-course picks (prevents latching onto spectators).
+                has_in_course = any(
+                    centerline["lateral_error_px"](det["x"], det["y"]) <= corridor_max_px
+                    for det in detections
+                )
+                if has_in_course:
+                    lat = centerline["lateral_error_px"](chosen["x"], chosen["y"])
+                    if lat > corridor_max_px:
+                        missing += 1
+                        if missing > max_gap:
+                            last_pos = None
+                            last_vel = (0.0, 0.0)
+                            last_frame = None
+                            last_area = None
+                            last_track_id = None
+                        continue
 
             x, y = chosen["x"], chosen["y"]
             gap_to_prev = max(1, frame_idx - last_frame) if last_frame is not None else 1
@@ -725,6 +906,9 @@ class SkierTracker:
             last_area = float(chosen["area"])
             last_track_id = current_track_id
             missing = 0
+            if current_track_id is not None:
+                track_id_counts[current_track_id] = track_id_counts.get(current_track_id, 0) + 1
+                primary_track_id = max(track_id_counts, key=track_id_counts.get)
 
             trajectory.append({
                 "frame": frame_idx,
