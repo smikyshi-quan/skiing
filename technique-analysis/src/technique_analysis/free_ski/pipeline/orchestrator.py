@@ -252,6 +252,8 @@ class TechniqueAnalysisRunner:
                 else:
                     extractor.update_tracking(frame)  # ByteTrack only
 
+        scene_cuts = extractor.scene_cuts_detected
+
         # 3. Fill detection gaps — 8 frames covers the typical 0.3-0.4s
         #    carve-transition window where MediaPipe confidence drops
         all_poses = _fill_pose_gaps(all_poses, frame_timestamps, max_gap=8)
@@ -284,6 +286,11 @@ class TechniqueAnalysisRunner:
             metrics_list, all_poses, viewpoint_warning,
             resolved_max_fps, resolved_max_dimension,
         )
+        if scene_cuts > 0:
+            quality.warnings.append(
+                f"{scene_cuts} scene cut(s) detected — metrics may span multiple shots. "
+                "Trim to a single continuous run for best results."
+            )
 
         # 7. Coaching tips
         coaching_tips = generate_coaching_tips(metrics_list, turns, quality)

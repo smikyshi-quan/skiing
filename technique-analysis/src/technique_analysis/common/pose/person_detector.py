@@ -133,6 +133,10 @@ class PersonDetector:
         # Consecutive frames for which the top track has led by _COMMIT_MARGIN
         self._commit_streak: int = 0
 
+        # When True, the next detect_primary call uses persist=False to break
+        # ByteTrack's association chain across a scene cut.
+        self._reset_bytetrack_pending: bool = False
+
     # ------------------------------------------------------------------
     # Model loading
     # ------------------------------------------------------------------
@@ -246,6 +250,25 @@ class PersonDetector:
         self._committed_lost = 0
         self._commit_streak  = 0
 
+    def reset_bytetrack(self) -> None:
+        """Hard reset after a scene cut.
+
+        On the next detect_primary call, ByteTrack is re-initialised by
+        running YOLO with persist=False for one frame, breaking the track-ID
+        association chain from the previous shot.  Warm-up scoring state is
+        also cleared so stale velocities / scores from the old shot don't
+        bias selection in the new one.
+        """
+        self._reset_bytetrack_pending = True
+        # Also clear all per-track state — old track history is meaningless
+        # across a hard cut.
+        self._track_ages.clear()
+        self._track_scores.clear()
+        self._track_prev_center.clear()
+        self._track_smoothed_vel.clear()
+        self._track_last_seen.clear()
+        self._reset_to_warmup()
+
     # ------------------------------------------------------------------
     # Primary API
     # ------------------------------------------------------------------
@@ -257,9 +280,16 @@ class PersonDetector:
         self._ensure_loaded()
         self._frame_count += 1
 
+        # persist=False for one frame after a scene cut — breaks ByteTrack's
+        # association chain so old track IDs aren't matched to new-shot people.
+        persist = True
+        if self._reset_bytetrack_pending:
+            persist = False
+            self._reset_bytetrack_pending = False
+
         results = self._model.track(
             frame_bgr,
-            persist=True,
+            persist=persist,
             conf=self._conf,
             classes=[_PERSON_CLASS],
             verbose=False,

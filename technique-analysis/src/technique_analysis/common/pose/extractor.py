@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,71 @@ from technique_analysis.common.pose.tracker import PersonTracker
 
 # Key joint indices for confidence scoring
 _CONFIDENCE_JOINTS = [11, 12, 23, 24, 25, 26, 27, 28]
+
+
+# ---------------------------------------------------------------------------
+# Scene cut detector
+# ---------------------------------------------------------------------------
+
+class _SceneCutDetector:
+    """Cheap scene cut detector using mean-absolute-difference on a small
+    grayscale thumbnail with a rolling robust threshold.
+
+    Mirrors the PySceneDetect AdaptiveDetector pattern:
+      - Compute MAD between consecutive 64×36 grayscale frames.
+      - Maintain a rolling buffer of recent MAD values.
+      - Fire a cut when the current MAD exceeds  median + K * spread
+        (spread = median absolute deviation of the buffer — robust to outliers).
+      - A short cooldown prevents re-triggering immediately after a cut.
+    """
+
+    _SMALL_W  = 64
+    _SMALL_H  = 36
+    _BUFFER   = 30     # rolling window length for robust threshold
+    _K_SIGMA  = 3.0    # threshold multiplier on the robust spread
+    _MIN_MAD  = 12.0   # absolute floor — ignores nearly-static scenes
+    _COOLDOWN = 15     # frames suppressed after a confirmed cut
+
+    def __init__(self) -> None:
+        self._prev_gray: np.ndarray | None = None
+        self._mad_buffer: collections.deque = collections.deque(
+            maxlen=self._BUFFER
+        )
+        self._cooldown_remaining: int = 0
+
+    def is_cut(self, frame_bgr: np.ndarray) -> bool:
+        """Return True if *frame_bgr* looks like the first frame of a new shot."""
+        small = cv2.resize(
+            frame_bgr, (self._SMALL_W, self._SMALL_H),
+            interpolation=cv2.INTER_AREA,
+        )
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+        if self._prev_gray is None:
+            self._prev_gray = gray
+            return False
+
+        mad = float(np.mean(np.abs(gray - self._prev_gray)))
+        self._prev_gray = gray
+        self._mad_buffer.append(mad)
+
+        if self._cooldown_remaining > 0:
+            self._cooldown_remaining -= 1
+            return False
+
+        if len(self._mad_buffer) < 5:
+            return False   # not enough history yet
+
+        buf    = np.array(self._mad_buffer)
+        median = float(np.median(buf))
+        spread = float(np.median(np.abs(buf - median)))
+        threshold = median + self._K_SIGMA * max(spread, 1.0)
+
+        if mad > threshold and mad > self._MIN_MAD:
+            self._cooldown_remaining = self._COOLDOWN
+            return True
+
+        return False
 
 _MODEL_PREFERENCE = ["pose_landmarker_full.task", "pose_landmarker_lite.task"]
 _FULL_MODEL_URL = (
@@ -110,6 +176,8 @@ class PoseExtractor:
         self._last_timestamp_s: float | None = None
         self._yolo_ok = True   # flips to False on repeated YOLO failures
         self._frames_since_detection: int = 0  # for adaptive size-gate fallback
+        self._cut_detector = _SceneCutDetector()
+        self.scene_cuts_detected: int = 0      # reported in quality warnings
 
     # ------------------------------------------------------------------
     # Context manager
@@ -161,6 +229,10 @@ class PoseExtractor:
         Called on intermediate frames (between analysis frames) so ByteTrack
         sees continuous motion rather than large time jumps.
         """
+        if self._cut_detector.is_cut(frame_bgr):
+            self.scene_cuts_detected += 1
+            self._detector.reset_bytetrack()
+            print(f"[tracker] Scene cut #{self.scene_cuts_detected} detected — resetting tracker")
         if self._yolo_ok:
             try:
                 self._detector.detect_primary(frame_bgr)
@@ -221,6 +293,13 @@ class PoseExtractor:
         self._last_timestamp_s = timestamp_s
 
         h, w = frame_bgr.shape[:2]
+
+        # Scene cut check — must run before YOLO so the tracker is reset
+        # before ByteTrack tries to associate across the cut boundary.
+        if self._cut_detector.is_cut(frame_bgr):
+            self.scene_cuts_detected += 1
+            self._detector.reset_bytetrack()
+            print(f"[tracker] Scene cut #{self.scene_cuts_detected} detected — resetting tracker")
 
         # ------ Two-step path (YOLOv8 ByteTrack → crop → MediaPipe) ---------
         if self._yolo_ok:
