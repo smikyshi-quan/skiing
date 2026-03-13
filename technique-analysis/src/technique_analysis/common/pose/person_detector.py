@@ -138,6 +138,15 @@ class PersonDetector:
         self._reset_bytetrack_pending: bool = False
 
     # ------------------------------------------------------------------
+    # Public read-only state
+    # ------------------------------------------------------------------
+
+    @property
+    def committed_id(self) -> int | None:
+        """Track ID currently locked, or None during warm-up."""
+        return self._committed_id
+
+    # ------------------------------------------------------------------
     # Model loading
     # ------------------------------------------------------------------
 

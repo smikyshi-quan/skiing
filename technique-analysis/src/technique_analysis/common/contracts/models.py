@@ -135,6 +135,8 @@ class TurnSummary:
     smoothness_score: float | None = None # 0–100 motion smoothness
     peak_lateral_shift: float | None = None  # max abs com_shift_x in metres
     amplitude: float | None = None        # com_shift_x peak-to-peak in metres
+    # Which tracking segment this turn belongs to (0 = only/first segment)
+    segment_idx: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return _jsonable(self)
@@ -147,6 +149,28 @@ class CoachingTip:
     evidence: str
     severity: str
     time_ranges: list[tuple[float, float]] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return _jsonable(self)
+
+
+@dataclass(slots=True)
+class TrackingSegment:
+    """One continuous tracking epoch — a period where the tracker was locked
+    to the same athlete (or a presumed-same re-lock after a brief gap).
+
+    Multiple segments in a video indicate that either multiple athletes ran
+    through the frame, or the tracker lost and re-acquired a subject after
+    a significant gap.  The segment with the most high-confidence frames is
+    marked is_primary=True and is the most reliable for technique analysis.
+    """
+    idx: int
+    start_s: float
+    end_s: float
+    n_confident_frames: int   # frames with pose_confidence >= 0.4
+    mean_confidence: float
+    n_turns: int
+    is_primary: bool
 
     def as_dict(self) -> dict[str, Any]:
         return _jsonable(self)
@@ -180,6 +204,9 @@ class TechniqueRunSummary:
     coaching_tips: list[CoachingTip]
     artifacts: list[dict]
     codec_used: str
+    # Tracking segments — one entry per detected athlete epoch.
+    # Empty list means the whole video is treated as one segment (single athlete).
+    segments: list[TrackingSegment] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         payload = _jsonable(self)
@@ -188,4 +215,5 @@ class TechniqueRunSummary:
         payload["quality"] = self.quality.as_dict()
         payload["turns"] = [t.as_dict() for t in self.turns]
         payload["coaching_tips"] = [c.as_dict() for c in self.coaching_tips]
+        payload["segments"] = [s.as_dict() for s in self.segments]
         return payload

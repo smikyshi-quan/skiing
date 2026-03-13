@@ -139,6 +139,11 @@ def _transform_landmarks(
     ]
 
 
+# Minimum uncommitted gap (seconds) that signals a new athlete epoch.
+# Gaps shorter than this are treated as brief re-locks of the same person.
+_NEW_SEGMENT_GAP_S = 2.0
+
+
 class PoseExtractor:
     """Two-step pose extractor: YOLOv8 person detector → MediaPipe on crop.
 
@@ -178,6 +183,14 @@ class PoseExtractor:
         self._frames_since_detection: int = 0  # for adaptive size-gate fallback
         self._cut_detector = _SceneCutDetector()
         self.scene_cuts_detected: int = 0      # reported in quality warnings
+
+        # Segment boundary tracking — Phase 4
+        # A new boundary is recorded when the tracker commits to a new track
+        # after being uncommitted for >= _NEW_SEGMENT_GAP_S seconds.
+        # segment_boundaries always starts with 0.0 (video start).
+        self.segment_boundaries: list[float] = [0.0]
+        self._prev_committed_id: int | None = None
+        self._uncommitted_since_ts: float | None = None
 
     # ------------------------------------------------------------------
     # Context manager
@@ -238,6 +251,34 @@ class PoseExtractor:
                 self._detector.detect_primary(frame_bgr)
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Internal: segment boundary tracking
+    # ------------------------------------------------------------------
+
+    def _update_segment_state(self, timestamp_s: float) -> None:
+        """Track committed/uncommitted transitions to detect athlete switches.
+
+        A new segment boundary is recorded when the tracker commits to a
+        (possibly new) track after being uncommitted for >= _NEW_SEGMENT_GAP_S.
+        Short re-locks (same athlete briefly lost) don't create new segments.
+        """
+        current = self._detector.committed_id
+
+        if self._prev_committed_id is None and current is not None:
+            # Just committed — was the preceding gap long enough?
+            if self._uncommitted_since_ts is not None:
+                gap = timestamp_s - self._uncommitted_since_ts
+                if gap >= _NEW_SEGMENT_GAP_S:
+                    self.segment_boundaries.append(timestamp_s)
+            self._uncommitted_since_ts = None
+
+        elif self._prev_committed_id is not None and current is None:
+            # Just went uncommitted — record when it started
+            if self._uncommitted_since_ts is None:
+                self._uncommitted_since_ts = timestamp_s
+
+        self._prev_committed_id = current
 
     # ------------------------------------------------------------------
     # Internal MediaPipe call
@@ -358,12 +399,14 @@ class PoseExtractor:
                         ]
 
                     self._frames_since_detection = 0
+                    self._update_segment_state(timestamp_s)
                     return self._make_frame_pose(
                         landmarks, world_landmarks, frame_idx, timestamp_s,
                         detection_bbox=(bx1, by1, bx2, by2),
                     )
                 # No primary person found — return None for gap-filling
                 self._frames_since_detection += 1
+                self._update_segment_state(timestamp_s)
                 return None
 
             except Exception as e:
