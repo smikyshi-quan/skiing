@@ -368,6 +368,7 @@ def render_overlay_video(
     turns: list[TurnSummary],
     output_path: Path,
     max_dimension: int | None = None,
+    show_bbox: bool = False,
 ) -> str:
     """Render annotated overlay video. Returns codec string used."""
     cap = cv2.VideoCapture(str(video_path))
@@ -462,7 +463,8 @@ def render_overlay_video(
             # --- Draw ---
             if pose is not None:
                 dim = _STALE_DIM if is_held else 1.0
-                _draw_bbox(frame, pose, hud_s)
+                if show_bbox:
+                    _draw_bbox(frame, pose, hud_s)
                 _draw_skeleton(frame, pose, w, h, dim=dim)
 
             turn_idx, turn_side = None, None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,71 @@ from technique_analysis.common.pose.tracker import PersonTracker
 
 # Key joint indices for confidence scoring
 _CONFIDENCE_JOINTS = [11, 12, 23, 24, 25, 26, 27, 28]
+
+
+# ---------------------------------------------------------------------------
+# Scene cut detector
+# ---------------------------------------------------------------------------
+
+class _SceneCutDetector:
+    """Cheap scene cut detector using mean-absolute-difference on a small
+    grayscale thumbnail with a rolling robust threshold.
+
+    Mirrors the PySceneDetect AdaptiveDetector pattern:
+      - Compute MAD between consecutive 64×36 grayscale frames.
+      - Maintain a rolling buffer of recent MAD values.
+      - Fire a cut when the current MAD exceeds  median + K * spread
+        (spread = median absolute deviation of the buffer — robust to outliers).
+      - A short cooldown prevents re-triggering immediately after a cut.
+    """
+
+    _SMALL_W  = 64
+    _SMALL_H  = 36
+    _BUFFER   = 30     # rolling window length for robust threshold
+    _K_SIGMA  = 3.0    # threshold multiplier on the robust spread
+    _MIN_MAD  = 12.0   # absolute floor — ignores nearly-static scenes
+    _COOLDOWN = 15     # frames suppressed after a confirmed cut
+
+    def __init__(self) -> None:
+        self._prev_gray: np.ndarray | None = None
+        self._mad_buffer: collections.deque = collections.deque(
+            maxlen=self._BUFFER
+        )
+        self._cooldown_remaining: int = 0
+
+    def is_cut(self, frame_bgr: np.ndarray) -> bool:
+        """Return True if *frame_bgr* looks like the first frame of a new shot."""
+        small = cv2.resize(
+            frame_bgr, (self._SMALL_W, self._SMALL_H),
+            interpolation=cv2.INTER_AREA,
+        )
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+        if self._prev_gray is None:
+            self._prev_gray = gray
+            return False
+
+        mad = float(np.mean(np.abs(gray - self._prev_gray)))
+        self._prev_gray = gray
+        self._mad_buffer.append(mad)
+
+        if self._cooldown_remaining > 0:
+            self._cooldown_remaining -= 1
+            return False
+
+        if len(self._mad_buffer) < 5:
+            return False   # not enough history yet
+
+        buf    = np.array(self._mad_buffer)
+        median = float(np.median(buf))
+        spread = float(np.median(np.abs(buf - median)))
+        threshold = median + self._K_SIGMA * max(spread, 1.0)
+
+        if mad > threshold and mad > self._MIN_MAD:
+            self._cooldown_remaining = self._COOLDOWN
+            return True
+
+        return False
 
 _MODEL_PREFERENCE = ["pose_landmarker_full.task", "pose_landmarker_lite.task"]
 _FULL_MODEL_URL = (
@@ -73,6 +139,11 @@ def _transform_landmarks(
     ]
 
 
+# Minimum uncommitted gap (seconds) that signals a new athlete epoch.
+# Gaps shorter than this are treated as brief re-locks of the same person.
+_NEW_SEGMENT_GAP_S = 2.0
+
+
 class PoseExtractor:
     """Two-step pose extractor: YOLOv8 person detector → MediaPipe on crop.
 
@@ -88,6 +159,19 @@ class PoseExtractor:
     no person for the current frame.
     """
 
+    # Minimum bbox height as a fraction of analysis frame height.
+    # MediaPipe internally resizes crops to 224px (detector) / 256px (landmarker),
+    # so a person shorter than ~7% of frame height produces an 8×-upscaled crop
+    # with severe blur artefacts.  7% ≈ 75px at 1080p, 34px at 480p.
+    _MIN_BBOX_HEIGHT_FRAC: float = 0.07
+    # Absolute floor — never pass a crop shorter than this regardless of resolution.
+    _MIN_BBOX_HEIGHT_PX: int = 40
+    # After this many consecutive frames with no detection passing the gate,
+    # temporarily halve the height threshold so a distant racer can slip through.
+    # Metrics are still suppressed until pose confidence recovers.
+    _ADAPTIVE_FALLBACK_AFTER: int = 30
+    _ADAPTIVE_HEIGHT_FRAC: float = 0.035   # ~half of normal minimum
+
     def __init__(self, min_visibility: float = 0.5) -> None:
         self._min_visibility = min_visibility
         self._landmarker: Any = None
@@ -96,6 +180,17 @@ class PoseExtractor:
         self._pose_tracker = PersonTracker()     # fallback: tracks hip midpoints
         self._last_timestamp_s: float | None = None
         self._yolo_ok = True   # flips to False on repeated YOLO failures
+        self._frames_since_detection: int = 0  # for adaptive size-gate fallback
+        self._cut_detector = _SceneCutDetector()
+        self.scene_cuts_detected: int = 0      # reported in quality warnings
+
+        # Segment boundary tracking — Phase 4
+        # A new boundary is recorded when the tracker commits to a new track
+        # after being uncommitted for >= _NEW_SEGMENT_GAP_S seconds.
+        # segment_boundaries always starts with 0.0 (video start).
+        self.segment_boundaries: list[float] = [0.0]
+        self._prev_committed_id: int | None = None
+        self._uncommitted_since_ts: float | None = None
 
     # ------------------------------------------------------------------
     # Context manager
@@ -147,11 +242,43 @@ class PoseExtractor:
         Called on intermediate frames (between analysis frames) so ByteTrack
         sees continuous motion rather than large time jumps.
         """
+        if self._cut_detector.is_cut(frame_bgr):
+            self.scene_cuts_detected += 1
+            self._detector.reset_bytetrack()
+            print(f"[tracker] Scene cut #{self.scene_cuts_detected} detected — resetting tracker")
         if self._yolo_ok:
             try:
                 self._detector.detect_primary(frame_bgr)
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Internal: segment boundary tracking
+    # ------------------------------------------------------------------
+
+    def _update_segment_state(self, timestamp_s: float) -> None:
+        """Track committed/uncommitted transitions to detect athlete switches.
+
+        A new segment boundary is recorded when the tracker commits to a
+        (possibly new) track after being uncommitted for >= _NEW_SEGMENT_GAP_S.
+        Short re-locks (same athlete briefly lost) don't create new segments.
+        """
+        current = self._detector.committed_id
+
+        if self._prev_committed_id is None and current is not None:
+            # Just committed — was the preceding gap long enough?
+            if self._uncommitted_since_ts is not None:
+                gap = timestamp_s - self._uncommitted_since_ts
+                if gap >= _NEW_SEGMENT_GAP_S:
+                    self.segment_boundaries.append(timestamp_s)
+            self._uncommitted_since_ts = None
+
+        elif self._prev_committed_id is not None and current is None:
+            # Just went uncommitted — record when it started
+            if self._uncommitted_since_ts is None:
+                self._uncommitted_since_ts = timestamp_s
+
+        self._prev_committed_id = current
 
     # ------------------------------------------------------------------
     # Internal MediaPipe call
@@ -208,20 +335,35 @@ class PoseExtractor:
 
         h, w = frame_bgr.shape[:2]
 
+        # Scene cut check — must run before YOLO so the tracker is reset
+        # before ByteTrack tries to associate across the cut boundary.
+        if self._cut_detector.is_cut(frame_bgr):
+            self.scene_cuts_detected += 1
+            self._detector.reset_bytetrack()
+            print(f"[tracker] Scene cut #{self.scene_cuts_detected} detected — resetting tracker")
+
         # ------ Two-step path (YOLOv8 ByteTrack → crop → MediaPipe) ---------
         if self._yolo_ok:
             try:
                 best_bbox = self._detector.detect_primary(frame_bgr)
                 if best_bbox is not None:
                     bx1, by1, bx2, by2, bconf = best_bbox
-                    raw_area = (bx2 - bx1) * (by2 - by1)
+                    bbox_h = by2 - by1
 
-                    # Area gate: skip MediaPipe on tiny distant skiers.
-                    # Pose estimation on a <55×65px person crop is unreliable
-                    # and produces scattered landmarks that look worse than
-                    # nothing.  Let gap-filling carry the last good pose instead.
-                    _MIN_BBOX_AREA_PX = 3500  # ~55×65 pixels
-                    if raw_area < _MIN_BBOX_AREA_PX:
+                    # Resolution-invariant height gate.
+                    # MediaPipe internally resizes crops to 256px; crops shorter
+                    # than ~7% of frame height are upsampled 8× or more, producing
+                    # blur artefacts that make pose estimation unreliable.
+                    # After _ADAPTIVE_FALLBACK_AFTER consecutive missed frames the
+                    # threshold is halved so a distant skier can slip through —
+                    # metrics remain suppressed until pose confidence recovers.
+                    if self._frames_since_detection >= self._ADAPTIVE_FALLBACK_AFTER:
+                        min_h_frac = self._ADAPTIVE_HEIGHT_FRAC
+                    else:
+                        min_h_frac = self._MIN_BBOX_HEIGHT_FRAC
+                    min_h = max(self._MIN_BBOX_HEIGHT_PX, int(h * min_h_frac))
+                    if bbox_h < min_h:
+                        self._frames_since_detection += 1
                         return None
 
                     crop, region = self._detector.crop(frame_bgr, best_bbox)
@@ -256,11 +398,15 @@ class PoseExtractor:
                             for lm in result.pose_world_landmarks[0]
                         ]
 
+                    self._frames_since_detection = 0
+                    self._update_segment_state(timestamp_s)
                     return self._make_frame_pose(
                         landmarks, world_landmarks, frame_idx, timestamp_s,
                         detection_bbox=(bx1, by1, bx2, by2),
                     )
                 # No primary person found — return None for gap-filling
+                self._frames_since_detection += 1
+                self._update_segment_state(timestamp_s)
                 return None
 
             except Exception as e:

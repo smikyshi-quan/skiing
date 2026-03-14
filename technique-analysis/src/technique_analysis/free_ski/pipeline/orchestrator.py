@@ -16,6 +16,7 @@ from technique_analysis.common.contracts.models import (
     QualityReport,
     TechniqueRunConfig,
     TechniqueRunSummary,
+    TrackingSegment,
 )
 from technique_analysis.common.coaching.rules import generate_coaching_tips
 from technique_analysis.common.datasets.csv_writer import write_metrics_csv
@@ -34,6 +35,7 @@ from technique_analysis.common.metrics.scoring import (
     compute_turn_quality,
 )
 from technique_analysis.common.pose.extractor import PoseExtractor
+from technique_analysis.common.pose.vision_extractor import VisionPoseExtractor
 from technique_analysis.common.pose.smoother import (
     LandmarkSmoother,
     compute_jitter_score,
@@ -183,6 +185,56 @@ def _build_quality_report(
     )
 
 
+def _build_segments(
+    segment_boundaries: list[float],
+    metrics_list: list[FrameMetrics],
+    turns: list,
+    video_duration_s: float,
+) -> tuple[list[TrackingSegment], list]:
+    """Partition metrics and turns into tracking segments.
+
+    Each segment covers the period between two consecutive boundary timestamps.
+    The segment with the most high-confidence frames is marked is_primary=True.
+    Turns are annotated with the segment_idx they belong to.
+    """
+    ends = segment_boundaries[1:] + [video_duration_s]
+
+    segments: list[TrackingSegment] = []
+    for idx, (start_s, end_s) in enumerate(zip(segment_boundaries, ends)):
+        seg_metrics = [m for m in metrics_list if start_s <= m.timestamp_s < end_s]
+        confident   = [m for m in seg_metrics if m.pose_confidence >= 0.4]
+        mean_conf   = float(np.mean([m.pose_confidence for m in confident])) if confident else 0.0
+        n_turns     = sum(
+            1 for t in turns if t.start_s >= start_s and t.end_s <= end_s
+        )
+        segments.append(TrackingSegment(
+            idx=idx,
+            start_s=round(start_s, 2),
+            end_s=round(end_s, 2),
+            n_confident_frames=len(confident),
+            mean_confidence=round(mean_conf, 3),
+            n_turns=n_turns,
+            is_primary=False,
+        ))
+
+    # Mark the segment with the most high-confidence frames as primary
+    if segments:
+        best = max(range(len(segments)), key=lambda i: segments[i].n_confident_frames)
+        segments[best] = dc_replace(segments[best], is_primary=True)
+
+    # Annotate each turn with its segment_idx
+    annotated: list = []
+    for turn in turns:
+        seg_idx = 0
+        for seg in segments:
+            if turn.start_s >= seg.start_s and turn.end_s <= seg.end_s:
+                seg_idx = seg.idx
+                break
+        annotated.append(dc_replace(turn, segment_idx=seg_idx))
+
+    return segments, annotated
+
+
 class TechniqueAnalysisRunner:
     """Run the local-only technique analysis pipeline."""
 
@@ -226,7 +278,12 @@ class TechniqueAnalysisRunner:
         )
         next_analysis_ts = 0.0
 
-        with PoseExtractor(min_visibility=self.config.min_visibility) as extractor:
+        ExtractorClass = (
+            VisionPoseExtractor
+            if self.config.pose_engine == "vision"
+            else PoseExtractor
+        )
+        with ExtractorClass(min_visibility=self.config.min_visibility) as extractor:
             for frame_idx, timestamp_s, frame in iter_frames(
                 video_path,
                 max_fps=None,               # read EVERY frame for ByteTrack
@@ -245,6 +302,8 @@ class TechniqueAnalysisRunner:
                     next_analysis_ts = timestamp_s + analysis_interval_s
                 else:
                     extractor.update_tracking(frame)  # ByteTrack only
+
+        scene_cuts = extractor.scene_cuts_detected
 
         # 3. Fill detection gaps — 8 frames covers the typical 0.3-0.4s
         #    carve-transition window where MediaPipe confidence drops
@@ -273,11 +332,33 @@ class TechniqueAnalysisRunner:
         turns = segment_turns(metrics_list)
         turns = _apply_turn_scores(turns, metrics_list)
 
+        # 5b. Build tracking segments and annotate turns with segment_idx
+        segments, turns = _build_segments(
+            extractor.segment_boundaries,
+            metrics_list,
+            turns,
+            metadata.duration_s,
+        )
+
         # 6. Quality report
         quality = _build_quality_report(
             metrics_list, all_poses, viewpoint_warning,
             resolved_max_fps, resolved_max_dimension,
         )
+        if scene_cuts > 0:
+            quality.warnings.append(
+                f"{scene_cuts} scene cut(s) detected — metrics may span multiple shots. "
+                "Trim to a single continuous run for best results."
+            )
+        if len(segments) > 1:
+            primary = next(s for s in segments if s.is_primary)
+            quality.warnings.append(
+                f"{len(segments)} tracking segments detected — multiple athletes likely. "
+                f"Primary segment: t={primary.start_s:.1f}–{primary.end_s:.1f}s "
+                f"({primary.n_confident_frames} high-confidence frames, "
+                f"{primary.n_turns} turns). "
+                "Trim to a single continuous run for accurate analysis."
+            )
 
         # 7. Coaching tips
         coaching_tips = generate_coaching_tips(metrics_list, turns, quality)
@@ -296,6 +377,7 @@ class TechniqueAnalysisRunner:
                     turns=turns,
                     output_path=run_paths.overlay_path,
                     max_dimension=self.config.render_max_dimension,
+                    show_bbox=self.config.show_bbox,
                 )
             except Exception as exc:
                 quality.warnings.append(f"Overlay rendering failed: {exc}")
@@ -317,6 +399,7 @@ class TechniqueAnalysisRunner:
                 {"kind": "summary_json", "path": str(run_paths.summary_json_path)},
             ],
             codec_used=codec,
+            segments=segments,
         )
         run_paths.summary_json_path.write_text(
             json.dumps(summary.as_dict(), indent=2), encoding="utf-8"
