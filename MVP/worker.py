@@ -99,7 +99,7 @@ def _claim_job() -> dict | None:
 
 def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict]:
     """Invoke MVP/run.py and return (run_dir, mvp_summary_dict)."""
-    pose_engine = job_config.get("pose_engine", "vision")
+    pose_engine = job_config.get("pose_engine", "mediapipe")
     max_fps = job_config.get("max_fps", 12)
 
     cmd = [
