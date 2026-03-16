@@ -55,7 +55,9 @@ export default async function JobsPage() {
               >
                 <div className="min-w-0">
                   <p className="text-xs font-mono text-gray-400 truncate">
-                    {job.video_object_path?.split('/').pop() ?? job.id.slice(0, 8)}
+                    {String(job.config?.original_filename ?? '') ||
+                      job.video_object_path?.split('/').pop() ||
+                      job.id.slice(0, 8)}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {new Date(job.created_at).toLocaleString()}

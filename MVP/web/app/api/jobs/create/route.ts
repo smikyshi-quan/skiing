@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 
+function safeUploadFilename(original: string) {
+  const parts = original.split('.')
+  const rawExt = parts.length > 1 ? parts[parts.length - 1] : ''
+  const ext = /^[a-zA-Z0-9]{1,8}$/.test(rawExt) ? `.${rawExt.toLowerCase()}` : ''
+  return `video${ext || '.mp4'}`
+}
+
 export async function POST(req: NextRequest) {
   // 1. Verify the caller is authenticated
   const supabase = createClient()
@@ -24,7 +31,11 @@ export async function POST(req: NextRequest) {
   // 2. Insert job row
   const { data: job, error: jobError } = await service
     .from('jobs')
-    .insert({ user_id: user.id, status: 'created' })
+    .insert({
+      user_id: user.id,
+      status: 'created',
+      config: { original_filename: filename },
+    })
     .select()
     .single()
 
@@ -36,8 +47,11 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // 3. Generate signed upload URL  →  videos/<user_id>/<job_id>/<filename>
-  const storagePath = `${user.id}/${job.id}/${filename}`
+  // 3. Generate signed upload URL  →  videos/<user_id>/<job_id>/<safe_filename>
+  // Supabase Storage validates object keys; user-provided filenames (Unicode, spaces, etc.)
+  // can break uploads. Store the original name in `jobs.config.original_filename`.
+  const safeFilename = safeUploadFilename(filename)
+  const storagePath = `${user.id}/${job.id}/${safeFilename}`
   const { data: signed, error: signedError } = await service.storage
     .from('videos')
     .createSignedUploadUrl(storagePath)
