@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import signal
 import subprocess
 import sys
@@ -97,10 +98,13 @@ def _claim_job() -> dict | None:
     return update.data[0] if update.data else None
 
 
-def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict]:
-    """Invoke MVP/run.py and return (run_dir, mvp_summary_dict)."""
+def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict, dict | None]:
+    """Invoke MVP/run.py and return (run_dir, mvp_summary_dict, analysis_summary_dict_or_None)."""
     pose_engine = job_config.get("pose_engine", "mediapipe")
     max_fps = job_config.get("max_fps", 12)
+    max_dimension = job_config.get("max_dimension", None)
+    render_overlay = bool(job_config.get("render_overlay", True))
+    render_max_dimension = job_config.get("render_max_dimension", None)
 
     cmd = [
         sys.executable,
@@ -108,8 +112,13 @@ def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict]:
         str(local_video),
         "--pose-engine", str(pose_engine),
         "--max-fps", str(max_fps),
-        "--no-overlay",
     ]
+    if max_dimension is not None:
+        cmd.extend(["--max-dimension", str(max_dimension)])
+    if render_max_dimension is not None:
+        cmd.extend(["--render-max-dimension", str(render_max_dimension)])
+    if not render_overlay:
+        cmd.append("--no-overlay")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
 
     if result.returncode != 0:
@@ -133,20 +142,130 @@ def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict]:
         raise RuntimeError(f"mvp_summary.json not found in {run_dir}")
 
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    return run_dir, summary
+
+    analysis_summary_path = run_dir / "summary" / "summary.json"
+    analysis_summary = None
+    if analysis_summary_path.exists():
+        analysis_summary = json.loads(analysis_summary_path.read_text(encoding="utf-8"))
+
+    return run_dir, summary, analysis_summary
 
 
-def _upload_artifacts(job_id: str, run_dir: Path, summary: dict) -> list[dict]:
-    """Upload peak frames + summary JSON to Supabase Storage and return DB rows."""
+def _upload_bytes(
+    *,
+    bucket: str,
+    remote_path: str,
+    content: bytes,
+    content_type: str,
+) -> None:
+    supabase.storage.from_(bucket).upload(
+        path=remote_path,
+        file=content,
+        file_options={"content-type": content_type, "upsert": "true"},
+    )
+
+
+def _upload_file(
+    *,
+    bucket: str,
+    remote_path: str,
+    local_path: Path,
+    content_type: str | None = None,
+) -> None:
+    guessed, _ = mimetypes.guess_type(str(local_path))
+    _upload_bytes(
+        bucket=bucket,
+        remote_path=remote_path,
+        content=local_path.read_bytes(),
+        content_type=content_type or guessed or "application/octet-stream",
+    )
+
+
+def _extract_cool_moment_photos(
+    *,
+    video_path: Path,
+    turns: list[dict],
+    output_dir: Path,
+    limit: int = 24,
+) -> list[tuple[Path, dict]]:
+    """Extract one 'cool-moment' frame per turn (midpoint) and return [(path, meta)]."""
+    try:
+        import cv2  # type: ignore
+    except Exception:
+        return []
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return []
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results: list[tuple[Path, dict]] = []
+
+    try:
+        for turn in (turns or [])[:limit]:
+            turn_idx = turn.get("turn_idx")
+            side = turn.get("side")
+            try:
+                start_s = float(turn.get("start_s", 0.0))
+                end_s = float(turn.get("end_s", start_s))
+            except Exception:
+                continue
+
+            ts = (start_s + end_s) / 2.0 if end_s > start_s else start_s
+            cap.set(cv2.CAP_PROP_POS_MSEC, ts * 1000.0)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+
+            safe_side = str(side or "turn")
+            try:
+                safe_side = "".join(ch for ch in safe_side if ch.isalnum() or ch in ("-", "_"))[:12]
+            except Exception:
+                safe_side = "turn"
+
+            idx_str = f"{int(turn_idx):02d}" if isinstance(turn_idx, int) else "xx"
+            filename = f"cool_{idx_str}_{safe_side}_{ts:.1f}s.jpg"
+            out_path = output_dir / filename
+
+            ok = cv2.imwrite(str(out_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+            if not ok:
+                continue
+
+            results.append(
+                (
+                    out_path,
+                    {
+                        "turn_idx": turn_idx,
+                        "side": side,
+                        "timestamp_s": ts,
+                    },
+                )
+            )
+    finally:
+        cap.release()
+
+    return results
+
+
+def _upload_artifacts(
+    *,
+    job_id: str,
+    run_dir: Path,
+    summary: dict,
+    analysis_summary: dict | None,
+    local_video: Path,
+) -> list[dict]:
+    """Upload overlay video + cool-moment photos + summary to Supabase Storage and return DB rows."""
     rows: list[dict] = []
 
     # summary JSON
     summary_local = run_dir / "mvp_summary.json"
     summary_remote = f"jobs/{job_id}/summary.json"
-    supabase.storage.from_("artifacts").upload(
-        path=summary_remote,
-        file=summary_local.read_bytes(),
-        file_options={"content-type": "application/json", "upsert": "true"},
+    _upload_file(
+        bucket="artifacts",
+        remote_path=summary_remote,
+        local_path=summary_local,
+        content_type="application/json",
     )
     rows.append(
         {
@@ -157,22 +276,102 @@ def _upload_artifacts(job_id: str, run_dir: Path, summary: dict) -> list[dict]:
         }
     )
 
-    # peak frames
+    # overlay video (if present)
+    overlay_local: Path | None = None
+    for artifact in summary.get("artifacts", []):
+        if artifact.get("kind") == "video_overlay" and artifact.get("path"):
+            overlay_local = Path(str(artifact["path"]))
+            break
+    if overlay_local is None:
+        candidate = run_dir / "videos" / "overlay.mp4"
+        if candidate.exists():
+            overlay_local = candidate
+
+    if overlay_local and overlay_local.exists():
+        overlay_remote = f"jobs/{job_id}/overlay{overlay_local.suffix or '.mp4'}"
+        _upload_file(
+            bucket="artifacts",
+            remote_path=overlay_remote,
+            local_path=overlay_local,
+            content_type="video/mp4",
+        )
+        rows.append(
+            {
+                "job_id": job_id,
+                "kind": "video_overlay",
+                "object_path": overlay_remote,
+                "meta": {},
+            }
+        )
+
+    # metrics CSV (if present)
+    if analysis_summary:
+        for artifact in analysis_summary.get("artifacts", []) or []:
+            if artifact.get("kind") != "metrics_csv" or not artifact.get("path"):
+                continue
+            metrics_local = Path(str(artifact["path"]))
+            if not metrics_local.exists():
+                continue
+            metrics_remote = f"jobs/{job_id}/metrics.csv"
+            _upload_file(
+                bucket="artifacts",
+                remote_path=metrics_remote,
+                local_path=metrics_local,
+                content_type="text/csv",
+            )
+            rows.append(
+                {
+                    "job_id": job_id,
+                    "kind": "metrics_csv",
+                    "object_path": metrics_remote,
+                    "meta": {},
+                }
+            )
+            break
+
+    # cool-moment photos (midpoint per turn)
+    turns = (analysis_summary or {}).get("turns") if analysis_summary else None
+    if isinstance(turns, list) and turns:
+        source_video = overlay_local if overlay_local and overlay_local.exists() else local_video
+        extracted = _extract_cool_moment_photos(
+            video_path=source_video,
+            turns=turns,
+            output_dir=run_dir / "cool_moments",
+        )
+        for local_path, meta in extracted:
+            remote_path = f"jobs/{job_id}/cool_moments/{local_path.name}"
+            _upload_file(
+                bucket="artifacts",
+                remote_path=remote_path,
+                local_path=local_path,
+                content_type="image/jpeg",
+            )
+            rows.append(
+                {
+                    "job_id": job_id,
+                    "kind": "cool_moment_photo",
+                    "object_path": remote_path,
+                    "meta": meta or {},
+                }
+            )
+
+    # any legacy peak-pressure frames if present
     for artifact in summary.get("artifacts", []):
         kind = artifact.get("kind", "")
         if kind not in ("peak_pressure_frame", "peak_pressure_frame_enhanced"):
             continue
 
-        local_path = Path(artifact["path"])
+        local_path = Path(str(artifact.get("path") or ""))
         if not local_path.exists():
             print(f"  [warn] Frame not found locally, skipping: {local_path}")
             continue
 
         remote_path = f"jobs/{job_id}/frames/{local_path.name}"
-        supabase.storage.from_("artifacts").upload(
-            path=remote_path,
-            file=local_path.read_bytes(),
-            file_options={"content-type": "image/jpeg", "upsert": "true"},
+        _upload_file(
+            bucket="artifacts",
+            remote_path=remote_path,
+            local_path=local_path,
+            content_type="image/jpeg",
         )
         rows.append(
             {
@@ -217,13 +416,19 @@ def process_job(job: dict) -> None:
 
             # 2. Run technique analysis
             print(f"[{job_id[:8]}] Running technique analysis...")
-            run_dir, summary = _run_analysis(local_video, config)
+            run_dir, summary, analysis_summary = _run_analysis(local_video, config)
             n_turns = summary.get("turns", 0)
             print(f"[{job_id[:8]}] Analysis done — {n_turns} turn(s) detected")
 
             # 3. Upload results
             print(f"[{job_id[:8]}] Uploading artifacts...")
-            rows = _upload_artifacts(job_id, run_dir, summary)
+            rows = _upload_artifacts(
+                job_id=job_id,
+                run_dir=run_dir,
+                summary=summary,
+                analysis_summary=analysis_summary,
+                local_video=local_video,
+            )
             if rows:
                 supabase.table("artifacts").insert(rows).execute()
             print(f"[{job_id[:8]}] Uploaded {len(rows)} artifact(s)")

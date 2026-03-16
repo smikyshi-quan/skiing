@@ -78,8 +78,13 @@ export default function JobDetailPage() {
   }
 
   const { job, artifacts } = data
-  const frames = artifacts.filter((a) => a.kind === 'peak_pressure_frame')
+  const overlayArtifact = artifacts.find((a) => a.kind === 'video_overlay')
+  const coolMomentPhotos = artifacts.filter((a) => a.kind === 'cool_moment_photo')
+  const peakFrames = artifacts.filter(
+    (a) => a.kind === 'peak_pressure_frame' || a.kind === 'peak_pressure_frame_enhanced'
+  )
   const summaryArtifact = artifacts.find((a) => a.kind === 'summary_json')
+  const metricsArtifact = artifacts.find((a) => a.kind === 'metrics_csv')
 
   return (
     <div className="space-y-6">
@@ -123,14 +128,71 @@ export default function JobDetailPage() {
         )}
       </div>
 
-      {/* Peak frames gallery */}
-      {frames.length > 0 && (
+      {/* Overlay video */}
+      {overlayArtifact?.url && (
         <div>
           <h2 className="text-lg font-semibold mb-3">
-            Peak pressure frames ({frames.length})
+            Overlay video
+          </h2>
+          <div className="rounded-xl overflow-hidden border border-gray-200 bg-white">
+            <video
+              src={overlayArtifact.url}
+              controls
+              playsInline
+              className="w-full aspect-video bg-black"
+            />
+          </div>
+          <div className="mt-2">
+            <a
+              href={overlayArtifact.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-blue-600 hover:underline"
+            >
+              Open overlay video
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Cool-moment photos */}
+      {coolMomentPhotos.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold mb-3">
+            Cool-moment photos ({coolMomentPhotos.length})
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {frames.map((frame) => (
+            {coolMomentPhotos.map((photo) => (
+              <div
+                key={photo.id}
+                className="rounded-xl overflow-hidden border border-gray-200 bg-white"
+              >
+                <img
+                  src={photo.url}
+                  alt={`Turn ${(photo.meta.turn_idx ?? 0) + 1} ${photo.meta.side ?? ''}`}
+                  className="w-full aspect-video object-cover"
+                />
+                <div className="px-3 py-2 text-xs text-gray-500">
+                  Turn {(photo.meta.turn_idx ?? 0) + 1}
+                  {photo.meta.side ? ` (${photo.meta.side})` : ''}
+                  {photo.meta.timestamp_s != null
+                    ? ` · ${Number(photo.meta.timestamp_s).toFixed(1)} s`
+                    : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Peak frames gallery (legacy) */}
+      {peakFrames.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold mb-3">
+            Peak pressure frames ({peakFrames.length})
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {peakFrames.map((frame) => (
               <div
                 key={frame.id}
                 className="rounded-xl overflow-hidden border border-gray-200 bg-white"
@@ -146,6 +208,7 @@ export default function JobDetailPage() {
                   {frame.meta.timestamp_s != null
                     ? ` · ${Number(frame.meta.timestamp_s).toFixed(1)} s`
                     : ''}
+                  {frame.kind === 'peak_pressure_frame_enhanced' ? ' · enhanced' : ''}
                 </div>
               </div>
             ))}
@@ -153,17 +216,31 @@ export default function JobDetailPage() {
         </div>
       )}
 
-      {/* Summary download */}
-      {summaryArtifact && (
+      {/* Downloads */}
+      {(summaryArtifact || metricsArtifact) && (
         <div>
-          <a
-            href={summaryArtifact.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-blue-600 hover:underline"
-          >
-            Download analysis summary (JSON)
-          </a>
+          {summaryArtifact && (
+            <a
+              href={summaryArtifact.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-blue-600 hover:underline"
+            >
+              Download analysis summary (JSON)
+            </a>
+          )}
+          {metricsArtifact && (
+            <div className={summaryArtifact ? 'mt-2' : ''}>
+              <a
+                href={metricsArtifact.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-600 hover:underline"
+              >
+                Download metrics (CSV)
+              </a>
+            </div>
+          )}
         </div>
       )}
     </div>
