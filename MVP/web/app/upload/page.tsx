@@ -91,9 +91,15 @@ export default function UploadPage() {
           className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center cursor-pointer hover:border-blue-400 transition-colors select-none"
         >
           {file ? (
-            <p className="text-sm font-medium text-gray-800 truncate">{file.name}</p>
+            <div>
+              <p className="text-sm font-medium text-gray-800 truncate">{file.name}</p>
+              <p className="text-xs text-gray-400 mt-1">{(file.size / 1024 / 1024).toFixed(1)} MB</p>
+            </div>
           ) : (
-            <p className="text-sm text-gray-400">Click to select a video file</p>
+            <div>
+              <p className="text-sm text-gray-400">Click to select a video file</p>
+              <p className="text-xs text-gray-300 mt-1">Max 50 MB</p>
+            </div>
           )}
           <input
             ref={fileRef}
@@ -101,7 +107,18 @@ export default function UploadPage() {
             accept="video/*"
             className="hidden"
             onChange={(e) => {
-              setFile(e.target.files?.[0] ?? null)
+              const f = e.target.files?.[0] ?? null
+              if (f && f.size > 50 * 1024 * 1024) {
+                setError(
+                  `File is ${(f.size / 1024 / 1024).toFixed(0)} MB — max 50 MB. ` +
+                  `Compress with iMovie (File → Share → File, lower quality) or Handbrake first.`
+                )
+                setFile(null)
+                setStep('idle')
+                if (fileRef.current) fileRef.current.value = ''
+                return
+              }
+              setFile(f)
               setStep('idle')
               setError(null)
             }}

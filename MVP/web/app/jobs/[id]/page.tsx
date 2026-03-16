@@ -78,6 +78,7 @@ export default function JobDetailPage() {
   }
 
   const { job, artifacts } = data
+  const progressNote = typeof job.config?.progress_note === 'string' ? job.config.progress_note : null
   const overlayArtifact = artifacts.find((a) => a.kind === 'video_overlay')
   const coolMomentPhotos = artifacts.filter((a) => a.kind === 'cool_moment_photo')
   const peakFrames = artifacts.filter(
@@ -116,8 +117,13 @@ export default function JobDetailPage() {
         </div>
 
         {ACTIVE.has(job.status) && (
-          <div className="mt-4 h-1 bg-gray-100 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-400 rounded-full animate-pulse w-3/4" />
+          <div className="mt-4">
+            <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-400 rounded-full animate-pulse w-3/4" />
+            </div>
+            {progressNote && (
+              <p className="mt-2 text-xs text-blue-600">{progressNote}</p>
+            )}
           </div>
         )}
 

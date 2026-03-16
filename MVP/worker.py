@@ -121,6 +121,14 @@ def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict, dict
         cmd.append("--no-overlay")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
 
+    # Always print analysis output so warnings (e.g. overlay rendering failures) are visible
+    if result.stdout.strip():
+        for line in result.stdout.strip().splitlines():
+            print(f"  [run.py] {line}")
+    if result.stderr.strip():
+        for line in result.stderr.strip().splitlines()[-30:]:
+            print(f"  [run.py stderr] {line}", file=sys.stderr)
+
     if result.returncode != 0:
         stderr_tail = result.stderr[-2000:] if result.stderr else "(no stderr)"
         raise RuntimeError(f"run.py exited {result.returncode}:\n{stderr_tail}")
@@ -147,6 +155,8 @@ def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict, dict
     analysis_summary = None
     if analysis_summary_path.exists():
         analysis_summary = json.loads(analysis_summary_path.read_text(encoding="utf-8"))
+    else:
+        print(f"  [warn] analysis summary not found at {analysis_summary_path}", file=sys.stderr)
 
     return run_dir, summary, analysis_summary
 
@@ -158,11 +168,19 @@ def _upload_bytes(
     content: bytes,
     content_type: str,
 ) -> None:
-    supabase.storage.from_(bucket).upload(
-        path=remote_path,
-        file=content,
-        file_options={"content-type": content_type, "upsert": "true"},
-    )
+    try:
+        res = supabase.storage.from_(bucket).upload(
+            path=remote_path,
+            file=content,
+            file_options={"content-type": content_type, "upsert": "true"},
+        )
+        # storage3 may return error info without raising in some versions
+        if hasattr(res, "error") and res.error:
+            raise RuntimeError(f"Storage error: {res.error}")
+    except Exception as exc:
+        raise RuntimeError(
+            f"Upload to {bucket}/{remote_path} failed: {exc}"
+        ) from exc
 
 
 def _upload_file(
@@ -173,12 +191,15 @@ def _upload_file(
     content_type: str | None = None,
 ) -> None:
     guessed, _ = mimetypes.guess_type(str(local_path))
+    size_mb = local_path.stat().st_size / 1_048_576
+    print(f"  → {local_path.name} ({size_mb:.1f} MB) → {bucket}/{remote_path}")
     _upload_bytes(
         bucket=bucket,
         remote_path=remote_path,
         content=local_path.read_bytes(),
         content_type=content_type or guessed or "application/octet-stream",
     )
+    print(f"  ✓ {local_path.name} uploaded")
 
 
 def _extract_cool_moment_photos(
@@ -192,10 +213,12 @@ def _extract_cool_moment_photos(
     try:
         import cv2  # type: ignore
     except Exception:
+        print("  [warn] cv2 not available, skipping cool-moment extraction", file=sys.stderr)
         return []
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
+        print(f"  [warn] could not open video for cool-moment extraction: {video_path}", file=sys.stderr)
         return []
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -303,6 +326,9 @@ def _upload_artifacts(
                 "meta": {},
             }
         )
+    else:
+        expected = overlay_local or (run_dir / "videos" / "overlay.mp4")
+        print(f"  [warn] overlay video not found at {expected} — skipping", file=sys.stderr)
 
     # metrics CSV (if present)
     if analysis_summary:
@@ -332,12 +358,14 @@ def _upload_artifacts(
     # cool-moment photos (midpoint per turn)
     turns = (analysis_summary or {}).get("turns") if analysis_summary else None
     if isinstance(turns, list) and turns:
+        print(f"  extracting cool-moment frames for {len(turns)} turn(s)...")
         source_video = overlay_local if overlay_local and overlay_local.exists() else local_video
         extracted = _extract_cool_moment_photos(
             video_path=source_video,
             turns=turns,
             output_dir=run_dir / "cool_moments",
         )
+        print(f"  extracted {len(extracted)} cool-moment photo(s)")
         for local_path, meta in extracted:
             remote_path = f"jobs/{job_id}/cool_moments/{local_path.name}"
             _upload_file(
@@ -354,6 +382,8 @@ def _upload_artifacts(
                     "meta": meta or {},
                 }
             )
+    elif analysis_summary is not None:
+        print("  [warn] no turns in analysis summary — no cool-moment photos", file=sys.stderr)
 
     # any legacy peak-pressure frames if present
     for artifact in summary.get("artifacts", []):
@@ -392,7 +422,14 @@ def _upload_artifacts(
 def process_job(job: dict) -> None:
     job_id: str = job["id"]
     video_path_in_storage: str | None = job.get("video_object_path")
-    config: dict = job.get("config") or {}
+    config: dict = dict(job.get("config") or {})
+
+    def _set_progress(note: str) -> None:
+        """Write a progress note into jobs.config so the UI can show it."""
+        config["progress_note"] = note
+        supabase.table("jobs").update(
+            {"config": config, "updated_at": _now_iso()}
+        ).eq("id", job_id).execute()
 
     print(f"[{job_id[:8]}] Starting job (video: {video_path_in_storage})")
 
@@ -403,6 +440,7 @@ def process_job(job: dict) -> None:
     with tempfile.TemporaryDirectory(prefix="skicoach_") as tmpdir:
         try:
             # 1. Download video
+            _set_progress("Downloading video...")
             print(f"[{job_id[:8]}] Downloading video from Storage...")
             video_bytes: bytes = supabase.storage.from_("videos").download(
                 video_path_in_storage
@@ -410,17 +448,23 @@ def process_job(job: dict) -> None:
             suffix = Path(video_path_in_storage).suffix or ".mp4"
             local_video = Path(tmpdir) / f"video{suffix}"
             local_video.write_bytes(video_bytes)
-            print(
-                f"[{job_id[:8]}] Downloaded {len(video_bytes) / 1_048_576:.1f} MB"
-            )
+            size_mb = len(video_bytes) / 1_048_576
+            print(f"[{job_id[:8]}] Downloaded {size_mb:.1f} MB")
 
             # 2. Run technique analysis
+            _set_progress("Running pose analysis...")
             print(f"[{job_id[:8]}] Running technique analysis...")
             run_dir, summary, analysis_summary = _run_analysis(local_video, config)
             n_turns = summary.get("turns", 0)
             print(f"[{job_id[:8]}] Analysis done — {n_turns} turn(s) detected")
 
+            # Warn if quality flags were set
+            warnings = summary.get("quality", {}).get("warnings", [])
+            for w in warnings:
+                print(f"  [quality warn] {w}", file=sys.stderr)
+
             # 3. Upload results
+            _set_progress(f"Uploading results ({n_turns} turn(s) found)...")
             print(f"[{job_id[:8]}] Uploading artifacts...")
             rows = _upload_artifacts(
                 job_id=job_id,
@@ -434,9 +478,11 @@ def process_job(job: dict) -> None:
             print(f"[{job_id[:8]}] Uploaded {len(rows)} artifact(s)")
 
             # 4. Mark done
+            config.pop("progress_note", None)
             _set_status(
                 job_id,
                 "done",
+                config=config,
                 result_prefix=f"jobs/{job_id}/",
             )
             print(f"[{job_id[:8]}] Done.")
