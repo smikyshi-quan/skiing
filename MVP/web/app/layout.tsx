@@ -33,24 +33,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </a>
 
           <nav className="flex items-center gap-1 ml-auto">
-            <a
-              href="/upload"
-              className="text-sm px-3 py-1.5 rounded-lg transition-colors"
-              style={{ color: 'rgba(255,255,255,0.55)' }}
-              onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)')}
-            >
-              Upload
-            </a>
-            <a
-              href="/jobs"
-              className="text-sm px-3 py-1.5 rounded-lg transition-colors"
-              style={{ color: 'rgba(255,255,255,0.55)' }}
-              onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)')}
-            >
-              My Runs
-            </a>
+            <a href="/upload" className="nav-link">Upload</a>
+            <a href="/jobs" className="nav-link">My Runs</a>
           </nav>
         </header>
 
