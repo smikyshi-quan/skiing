@@ -1,3 +1,92 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-base: #07090F;
+    --bg-surface: #0F1219;
+    --bg-elevated: #171C28;
+    --border-subtle: rgba(255, 255, 255, 0.07);
+    --border-muted: rgba(255, 255, 255, 0.12);
+    --accent: #4F8EFF;
+    --accent-dim: rgba(79, 142, 255, 0.12);
+  }
+
+  html {
+    background-color: var(--bg-base);
+    color: #fff;
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: #fff;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer utilities {
+  .bg-base      { background-color: var(--bg-base); }
+  .bg-surface   { background-color: var(--bg-surface); }
+  .bg-elevated  { background-color: var(--bg-elevated); }
+  .border-subtle { border-color: var(--border-subtle); }
+  .border-muted  { border-color: var(--border-muted); }
+  .text-accent   { color: var(--accent); }
+  .bg-accent-dim { background-color: var(--accent-dim); }
+
+  .card {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 0.875rem;
+  }
+
+  .card-hover {
+    transition: border-color 150ms, background-color 150ms;
+  }
+
+  .card-hover:hover {
+    border-color: var(--border-muted);
+    background-color: var(--bg-elevated);
+  }
+
+  .btn-primary {
+    background-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    border-radius: 0.625rem;
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+    transition: opacity 150ms, filter 150ms;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .input-dark {
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border-muted);
+    border-radius: 0.625rem;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.875rem;
+    color: #fff;
+    width: 100%;
+    transition: border-color 150ms;
+    outline: none;
+  }
+
+  .input-dark::placeholder {
+    color: #4a5280;
+  }
+
+  .input-dark:focus {
+    border-color: var(--accent);
+  }
+}

@@ -42,66 +42,94 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-[60vh] flex items-center justify-center">
+    <div className="min-h-[80vh] flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-bold mb-6 text-center">
-          {mode === 'login' ? 'Sign in' : 'Create account'}
-        </h1>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Email</label>
-            <input
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Password</label>
-            <input
-              type="password"
-              required
-              minLength={6}
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          {message && (
-            <p
-              className={`text-sm rounded-md px-3 py-2 ${
-                message.kind === 'error'
-                  ? 'text-red-700 bg-red-50'
-                  : 'text-green-700 bg-green-50'
-              }`}
-            >
-              {message.text}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        {/* Logo mark */}
+        <div className="flex justify-center mb-8">
+          <div
+            className="w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-xl text-white"
+            style={{ background: 'var(--accent)' }}
           >
-            {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
-          </button>
-        </form>
+            S
+          </div>
+        </div>
 
-        <p className="text-sm text-center mt-5 text-gray-500">
+        <h1 className="text-2xl font-bold text-center text-white mb-1">
+          {mode === 'login' ? 'Welcome back' : 'Create your account'}
+        </h1>
+        <p className="text-sm text-center mb-8" style={{ color: 'rgba(255,255,255,0.4)' }}>
+          {mode === 'login'
+            ? 'Sign in to review your ski analysis'
+            : 'Start analysing your ski technique'}
+        </p>
+
+        <div className="card p-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                Email
+              </label>
+              <input
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="input-dark"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                Password
+              </label>
+              <input
+                type="password"
+                required
+                minLength={6}
+                placeholder="••••••••"
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="input-dark"
+              />
+            </div>
+
+            {message && (
+              <div
+                className="text-sm rounded-xl px-4 py-3"
+                style={{
+                  background: message.kind === 'error'
+                    ? 'rgba(239,68,68,0.12)'
+                    : 'rgba(34,208,122,0.12)',
+                  color: message.kind === 'error' ? '#F87171' : '#4ADE80',
+                  border: `1px solid ${message.kind === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(34,208,122,0.3)'}`,
+                }}
+              >
+                {message.text}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn-primary w-full mt-2"
+              style={{ padding: '0.75rem 1.25rem' }}
+            >
+              {loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
+            </button>
+          </form>
+        </div>
+
+        <p className="text-sm text-center mt-5" style={{ color: 'rgba(255,255,255,0.35)' }}>
           {mode === 'login' ? (
             <>
               No account?{' '}
               <button
                 onClick={() => { setMode('signup'); setMessage(null) }}
-                className="text-blue-600 hover:underline"
+                className="font-medium hover:underline"
+                style={{ color: 'var(--accent)' }}
               >
                 Sign up
               </button>
@@ -111,7 +139,8 @@ export default function LoginPage() {
               Already have an account?{' '}
               <button
                 onClick={() => { setMode('login'); setMessage(null) }}
-                className="text-blue-600 hover:underline"
+                className="font-medium hover:underline"
+                style={{ color: 'var(--accent)' }}
               >
                 Sign in
               </button>

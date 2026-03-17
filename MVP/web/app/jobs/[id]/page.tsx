@@ -16,18 +16,36 @@ const STATUS_LABEL: Record<JobStatus, string> = {
   created:  'Job created',
   uploaded: 'Video uploaded',
   queued:   'Waiting in queue',
-  running:  'Analysing run...',
+  running:  'Analysing run…',
   done:     'Analysis complete',
   error:    'Analysis failed',
 }
 
-const STATUS_PILL: Record<JobStatus, string> = {
-  created:  'bg-gray-100 text-gray-600',
-  uploaded: 'bg-blue-50  text-blue-700',
-  queued:   'bg-yellow-50 text-yellow-700',
-  running:  'bg-blue-100 text-blue-800',
-  done:     'bg-green-50 text-green-700',
-  error:    'bg-red-50   text-red-700',
+const STATUS_DOT: Record<JobStatus, string> = {
+  created:  'rgba(255,255,255,0.25)',
+  uploaded: '#4F8EFF',
+  queued:   '#F59E0B',
+  running:  '#4F8EFF',
+  done:     '#22D07A',
+  error:    '#F87171',
+}
+
+const STATUS_TEXT: Record<JobStatus, string> = {
+  created:  'rgba(255,255,255,0.5)',
+  uploaded: '#93C5FD',
+  queued:   '#FCD34D',
+  running:  '#93C5FD',
+  done:     '#6EE7B7',
+  error:    '#FCA5A5',
+}
+
+const STATUS_BG: Record<JobStatus, string> = {
+  created:  'rgba(255,255,255,0.07)',
+  uploaded: 'rgba(79,142,255,0.12)',
+  queued:   'rgba(245,158,11,0.12)',
+  running:  'rgba(79,142,255,0.12)',
+  done:     'rgba(34,208,122,0.12)',
+  error:    'rgba(248,113,113,0.12)',
 }
 
 export default function JobDetailPage() {
@@ -64,17 +82,27 @@ export default function JobDetailPage() {
 
   if (fetchError) {
     return (
-      <div>
-        <p className="text-red-600 text-sm mb-2">{fetchError}</p>
-        <Link href="/jobs" className="text-blue-600 text-sm hover:underline">
-          Back to jobs
+      <div className="space-y-3">
+        <div
+          className="text-sm rounded-xl px-4 py-3"
+          style={{ background: 'rgba(248,113,113,0.1)', color: '#FCA5A5', border: '1px solid rgba(248,113,113,0.25)' }}
+        >
+          {fetchError}
+        </div>
+        <Link href="/jobs" className="text-sm hover:underline" style={{ color: 'var(--accent)' }}>
+          ← Back to runs
         </Link>
       </div>
     )
   }
 
   if (!data) {
-    return <p className="text-sm text-gray-400 animate-pulse">Loading...</p>
+    return (
+      <div className="space-y-4 animate-pulse">
+        <div className="h-5 w-32 rounded-lg" style={{ background: 'rgba(255,255,255,0.07)' }} />
+        <div className="h-28 rounded-2xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }} />
+      </div>
+    )
   }
 
   const { job, artifacts } = data
@@ -86,61 +114,105 @@ export default function JobDetailPage() {
   )
   const summaryArtifact = artifacts.find((a) => a.kind === 'summary_json')
   const metricsArtifact = artifacts.find((a) => a.kind === 'metrics_csv')
+  const isActive = ACTIVE.has(job.status)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-gray-400">
-        <Link href="/jobs" className="hover:text-gray-700 transition-colors">
-          Jobs
+      <div className="flex items-center gap-2 text-sm" style={{ color: 'rgba(255,255,255,0.35)' }}>
+        <Link href="/jobs" className="hover:text-white transition-colors">
+          My Runs
         </Link>
-        <span>/</span>
-        <span className="font-mono">{job.id.slice(0, 8)}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 18l6-6-6-6"/>
+        </svg>
+        <span className="font-mono text-white">{job.id.slice(0, 8)}</span>
       </div>
 
       {/* Status card */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5">
+      <div className="card p-5">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-medium">{STATUS_LABEL[job.status]}</p>
-            <p className="text-xs text-gray-400 mt-1">
-              Updated {new Date(job.updated_at).toLocaleString()}
-            </p>
+          <div className="flex items-center gap-3">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+              style={{ background: STATUS_BG[job.status] }}
+            >
+              {isActive ? (
+                <div
+                  className="w-3 h-3 rounded-full animate-pulse"
+                  style={{ background: STATUS_DOT[job.status] }}
+                />
+              ) : job.status === 'done' ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={STATUS_DOT[job.status]} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={STATUS_DOT[job.status]} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+                </svg>
+              )}
+            </div>
+            <div>
+              <p className="font-semibold text-white">{STATUS_LABEL[job.status]}</p>
+              <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                Updated {new Date(job.updated_at).toLocaleString()}
+              </p>
+            </div>
           </div>
+
           <span
-            className={`shrink-0 text-xs font-medium px-2.5 py-1 rounded-full ${
-              STATUS_PILL[job.status]
-            }`}
+            className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-full"
+            style={{ background: STATUS_BG[job.status], color: STATUS_TEXT[job.status] }}
           >
-            {job.status}
+            {STATUS_LABEL[job.status]}
           </span>
         </div>
 
-        {ACTIVE.has(job.status) && (
-          <div className="mt-4">
-            <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
-              <div className="h-full bg-blue-400 rounded-full animate-pulse w-3/4" />
+        {/* Progress bar for active states */}
+        {isActive && (
+          <div className="mt-4 space-y-2">
+            <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+              <div
+                className="h-full rounded-full animate-pulse"
+                style={{ width: '65%', background: 'var(--accent)' }}
+              />
             </div>
             {progressNote && (
-              <p className="mt-2 text-xs text-blue-600">{progressNote}</p>
+              <p className="text-xs" style={{ color: '#93C5FD' }}>{progressNote}</p>
             )}
           </div>
         )}
 
+        {/* Error message */}
         {job.error && (
-          <p className="mt-3 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2.5">
+          <div
+            className="mt-4 text-sm rounded-xl px-4 py-3"
+            style={{ background: 'rgba(248,113,113,0.1)', color: '#FCA5A5', border: '1px solid rgba(248,113,113,0.2)' }}
+          >
             {job.error}
-          </p>
+          </div>
         )}
       </div>
 
-      {/* Overlay video */}
+      {/* Overlay video — full width, prominent */}
       {overlayArtifact?.url && (
         <div>
-          <h2 className="text-lg font-semibold mb-3">
-            Overlay video
-          </h2>
-          <div className="rounded-xl overflow-hidden border border-gray-200 bg-white">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xl font-bold text-white">Analysis video</h2>
+            <a
+              href={overlayArtifact.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors"
+              style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/>
+              </svg>
+              Open full screen
+            </a>
+          </div>
+          <div className="rounded-2xl overflow-hidden" style={{ background: '#000', border: '1px solid var(--border-subtle)' }}>
             <video
               src={overlayArtifact.url}
               controls
@@ -148,75 +220,83 @@ export default function JobDetailPage() {
               className="w-full aspect-video bg-black"
             />
           </div>
-          <div className="mt-2">
-            <a
-              href={overlayArtifact.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-blue-600 hover:underline"
-            >
-              Open overlay video
-            </a>
-          </div>
         </div>
       )}
 
       {/* Cool-moment photos */}
       {coolMomentPhotos.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold mb-3">
-            Cool-moment photos ({coolMomentPhotos.length})
+          <h2 className="text-xl font-bold text-white mb-4">
+            Key moments
+            <span className="ml-2 text-sm font-normal" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              {coolMomentPhotos.length} frames
+            </span>
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {coolMomentPhotos.map((photo) => (
-              <div
+              <a
                 key={photo.id}
-                className="rounded-xl overflow-hidden border border-gray-200 bg-white"
+                href={photo.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group rounded-2xl overflow-hidden block"
+                style={{ border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}
               >
-                <img
-                  src={photo.url}
-                  alt={`Turn ${(photo.meta.turn_idx ?? 0) + 1} ${photo.meta.side ?? ''}`}
-                  className="w-full aspect-video object-cover"
-                />
-                <div className="px-3 py-2 text-xs text-gray-500">
+                <div className="relative">
+                  <img
+                    src={photo.url}
+                    alt={`Turn ${(photo.meta.turn_idx ?? 0) + 1} ${photo.meta.side ?? ''}`}
+                    className="w-full aspect-video object-cover group-hover:scale-[1.02] transition-transform duration-300"
+                  />
+                </div>
+                <div className="px-3 py-2.5 text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>
                   Turn {(photo.meta.turn_idx ?? 0) + 1}
-                  {photo.meta.side ? ` (${photo.meta.side})` : ''}
+                  {photo.meta.side ? ` · ${photo.meta.side}` : ''}
                   {photo.meta.timestamp_s != null
-                    ? ` · ${Number(photo.meta.timestamp_s).toFixed(1)} s`
+                    ? ` · ${Number(photo.meta.timestamp_s).toFixed(1)}s`
                     : ''}
                 </div>
-              </div>
+              </a>
             ))}
           </div>
         </div>
       )}
 
-      {/* Peak frames gallery (legacy) */}
+      {/* Peak pressure frames */}
       {peakFrames.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold mb-3">
-            Peak pressure frames ({peakFrames.length})
+          <h2 className="text-xl font-bold text-white mb-4">
+            Peak pressure frames
+            <span className="ml-2 text-sm font-normal" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              {peakFrames.length} frames
+            </span>
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {peakFrames.map((frame) => (
-              <div
+              <a
                 key={frame.id}
-                className="rounded-xl overflow-hidden border border-gray-200 bg-white"
+                href={frame.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group rounded-2xl overflow-hidden block"
+                style={{ border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}
               >
                 <img
                   src={frame.url}
                   alt={`Turn ${(frame.meta.turn_idx ?? 0) + 1} ${frame.meta.side ?? ''}`}
-                  className="w-full aspect-video object-cover"
+                  className="w-full aspect-video object-cover group-hover:scale-[1.02] transition-transform duration-300"
                 />
-                <div className="px-3 py-2 text-xs text-gray-500">
+                <div className="px-3 py-2.5 text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>
                   Turn {(frame.meta.turn_idx ?? 0) + 1}
-                  {frame.meta.side ? ` (${frame.meta.side})` : ''}
+                  {frame.meta.side ? ` · ${frame.meta.side}` : ''}
                   {frame.meta.timestamp_s != null
-                    ? ` · ${Number(frame.meta.timestamp_s).toFixed(1)} s`
+                    ? ` · ${Number(frame.meta.timestamp_s).toFixed(1)}s`
                     : ''}
-                  {frame.kind === 'peak_pressure_frame_enhanced' ? ' · enhanced' : ''}
+                  {frame.kind === 'peak_pressure_frame_enhanced'
+                    ? <span style={{ color: 'var(--accent)' }}> · enhanced</span>
+                    : ''}
                 </div>
-              </div>
+              </a>
             ))}
           </div>
         </div>
@@ -224,28 +304,37 @@ export default function JobDetailPage() {
 
       {/* Downloads */}
       {(summaryArtifact || metricsArtifact) && (
-        <div>
+        <div
+          className="card p-5 flex flex-wrap gap-3"
+        >
+          <p className="w-full text-sm font-semibold text-white mb-1">Downloads</p>
           {summaryArtifact && (
             <a
               href={summaryArtifact.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-sm text-blue-600 hover:underline"
+              className="inline-flex items-center gap-2 text-xs px-3.5 py-2 rounded-lg font-medium transition-colors"
+              style={{ background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.7)' }}
             >
-              Download analysis summary (JSON)
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+              </svg>
+              Summary JSON
             </a>
           )}
           {metricsArtifact && (
-            <div className={summaryArtifact ? 'mt-2' : ''}>
-              <a
-                href={metricsArtifact.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-blue-600 hover:underline"
-              >
-                Download metrics (CSV)
-              </a>
-            </div>
+            <a
+              href={metricsArtifact.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-xs px-3.5 py-2 rounded-lg font-medium transition-colors"
+              style={{ background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.7)' }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+              </svg>
+              Metrics CSV
+            </a>
           )}
         </div>
       )}

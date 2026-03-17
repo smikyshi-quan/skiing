@@ -6,6 +6,24 @@ import { createClient } from '@/lib/supabase/client'
 
 type Step = 'idle' | 'creating' | 'uploading' | 'finalizing' | 'done' | 'error'
 
+const PROGRESS: Record<Step, number> = {
+  idle: 0,
+  creating: 15,
+  uploading: 60,
+  finalizing: 90,
+  done: 100,
+  error: 0,
+}
+
+const LABEL: Record<Step, string> = {
+  idle: '',
+  creating: 'Creating job…',
+  uploading: 'Uploading video…',
+  finalizing: 'Queuing analysis…',
+  done: 'Queued! Opening run…',
+  error: '',
+}
+
 export default function UploadPage() {
   const router = useRouter()
   const supabase = createClient()
@@ -14,6 +32,7 @@ export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
   const [step, setStep] = useState<Step>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState(false)
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault()
@@ -21,7 +40,6 @@ export default function UploadPage() {
     setError(null)
 
     try {
-      // 1. Create job row + get signed upload URL (service role on server)
       setStep('creating')
       const createRes = await fetch('/api/jobs/create', {
         method: 'POST',
@@ -34,14 +52,12 @@ export default function UploadPage() {
       }
       const { jobId, path, token } = await createRes.json()
 
-      // 2. Upload video directly to Supabase Storage via signed URL
       setStep('uploading')
       const { error: uploadError } = await supabase.storage
         .from('videos')
         .uploadToSignedUrl(path, token, file)
       if (uploadError) throw uploadError
 
-      // 3. Mark job queued so the worker picks it up
       setStep('finalizing')
       const markRes = await fetch('/api/jobs/mark-uploaded', {
         method: 'POST',
@@ -61,94 +77,147 @@ export default function UploadPage() {
     }
   }
 
-  const PROGRESS: Record<Step, number> = {
-    idle: 0,
-    creating: 15,
-    uploading: 60,
-    finalizing: 90,
-    done: 100,
-    error: 0,
-  }
-
-  const LABEL: Record<Step, string> = {
-    idle: '',
-    creating: 'Creating job...',
-    uploading: 'Uploading video...',
-    finalizing: 'Queuing analysis...',
-    done: 'Queued! Opening job...',
-    error: '',
+  function handleFilePick(f: File | null) {
+    if (!f) return
+    if (f.size > 50 * 1024 * 1024) {
+      setError(
+        `File is ${(f.size / 1024 / 1024).toFixed(0)} MB — max 50 MB. ` +
+        `Compress with iMovie (File → Share → File, lower quality) or Handbrake first.`
+      )
+      setFile(null)
+      setStep('idle')
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
+    setFile(f)
+    setStep('idle')
+    setError(null)
   }
 
   const busy = step !== 'idle' && step !== 'done' && step !== 'error'
 
   return (
     <div className="max-w-lg">
-      <h1 className="text-2xl font-bold mb-6">Analyse a run</h1>
+      {/* Page header */}
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-white tracking-tight">Analyse a run</h1>
+        <p className="mt-2 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
+          Upload your ski video and get AI-powered technique analysis
+        </p>
+      </div>
 
       <form onSubmit={handleUpload} className="space-y-5">
+        {/* Drop zone */}
         <div
-          onClick={() => fileRef.current?.click()}
-          className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center cursor-pointer hover:border-blue-400 transition-colors select-none"
+          onClick={() => !busy && fileRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={e => {
+            e.preventDefault()
+            setDragOver(false)
+            handleFilePick(e.dataTransfer.files?.[0] ?? null)
+          }}
+          className="relative rounded-2xl p-10 text-center cursor-pointer select-none transition-all"
+          style={{
+            border: `2px dashed ${dragOver ? 'var(--accent)' : file ? 'rgba(79,142,255,0.5)' : 'rgba(255,255,255,0.12)'}`,
+            background: dragOver
+              ? 'var(--accent-dim)'
+              : file
+              ? 'rgba(79,142,255,0.06)'
+              : 'var(--bg-surface)',
+          }}
         >
           {file ? (
-            <div>
-              <p className="text-sm font-medium text-gray-800 truncate">{file.name}</p>
-              <p className="text-xs text-gray-400 mt-1">{(file.size / 1024 / 1024).toFixed(1)} MB</p>
+            <div className="space-y-1">
+              {/* Video icon */}
+              <div className="flex justify-center mb-3">
+                <div
+                  className="w-12 h-12 rounded-xl flex items-center justify-center"
+                  style={{ background: 'var(--accent-dim)' }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+                  </svg>
+                </div>
+              </div>
+              <p className="text-sm font-semibold text-white truncate px-4">{file.name}</p>
+              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                {(file.size / 1024 / 1024).toFixed(1)} MB
+              </p>
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); setFile(null); setStep('idle'); if (fileRef.current) fileRef.current.value = '' }}
+                className="mt-3 text-xs px-3 py-1 rounded-lg"
+                style={{ color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.07)' }}
+              >
+                Change file
+              </button>
             </div>
           ) : (
-            <div>
-              <p className="text-sm text-gray-400">Click to select a video file</p>
-              <p className="text-xs text-gray-300 mt-1">Max 50 MB</p>
+            <div className="space-y-3">
+              <div className="flex justify-center">
+                <div
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                  style={{ background: 'rgba(255,255,255,0.05)' }}
+                >
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                  </svg>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-white">Drop your video here</p>
+                <p className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                  or click to browse — MP4, MOV, AVI · Max 50 MB
+                </p>
+              </div>
             </div>
           )}
+
           <input
             ref={fileRef}
             type="file"
             accept="video/*"
             className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0] ?? null
-              if (f && f.size > 50 * 1024 * 1024) {
-                setError(
-                  `File is ${(f.size / 1024 / 1024).toFixed(0)} MB — max 50 MB. ` +
-                  `Compress with iMovie (File → Share → File, lower quality) or Handbrake first.`
-                )
-                setFile(null)
-                setStep('idle')
-                if (fileRef.current) fileRef.current.value = ''
-                return
-              }
-              setFile(f)
-              setStep('idle')
-              setError(null)
-            }}
+            onChange={e => handleFilePick(e.target.files?.[0] ?? null)}
           />
         </div>
 
+        {/* Progress bar */}
         {(busy || step === 'done') && (
-          <div className="space-y-1.5">
-            <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+          <div className="space-y-2">
+            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
               <div
-                className="h-full bg-blue-500 rounded-full transition-all duration-500"
-                style={{ width: `${PROGRESS[step]}%` }}
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${PROGRESS[step]}%`, background: 'var(--accent)' }}
               />
             </div>
-            <p className="text-xs text-gray-500">{LABEL[step]}</p>
+            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{LABEL[step]}</p>
           </div>
         )}
 
+        {/* Error */}
         {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+          <div
+            className="text-sm rounded-xl px-4 py-3"
+            style={{
+              background: 'rgba(239,68,68,0.1)',
+              color: '#F87171',
+              border: '1px solid rgba(239,68,68,0.25)',
+            }}
+          >
             {error}
-          </p>
+          </div>
         )}
 
+        {/* CTA */}
         <button
           type="submit"
           disabled={!file || busy || step === 'done'}
-          className="w-full bg-blue-600 text-white rounded-md px-4 py-2.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="btn-primary w-full text-base"
+          style={{ padding: '0.875rem 1.25rem', fontSize: '0.9375rem' }}
         >
-          {busy ? LABEL[step] : 'Analyse'}
+          {busy ? LABEL[step] : 'Start analysis'}
         </button>
       </form>
     </div>
