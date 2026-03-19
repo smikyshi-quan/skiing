@@ -24,7 +24,7 @@ export default function LoginPage() {
       if (mode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
-        router.push('/jobs')
+        router.push('/')
         router.refresh()
       } else {
         const { error } = await supabase.auth.signUp({ email, password })
@@ -41,113 +41,166 @@ export default function LoginPage() {
     }
   }
 
+  const previewTags = [
+    'Edge angle',
+    'Turn rhythm',
+    'Upper-body quietness',
+    'Balance',
+    'Pressure timing',
+    'Progress tracking',
+  ]
+
   return (
-    <div className="min-h-[80vh] flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        {/* Logo mark */}
-        <div className="flex justify-center mb-8">
-          <div
-            className="w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-xl text-white"
-            style={{ background: 'var(--accent)' }}
-          >
-            S
+    <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+      <section className="surface-card p-8 lg:p-10 overflow-hidden">
+        <span className="eyebrow">AI ski coach in your pocket</span>
+        <div className="mt-6 max-w-xl">
+          <h1 className="section-title">
+            Bring every run back with clearer feedback.
+          </h1>
+          <p className="section-copy mt-4">
+            Upload a clip, review your movement, and turn each session into a sharper practice plan.
+          </p>
+        </div>
+
+        <div className="mt-6 flex flex-wrap gap-2">
+          {previewTags.map((tag) => (
+            <span key={tag} className="accent-chip">{tag}</span>
+          ))}
+        </div>
+
+        <div className="mt-8 grid gap-4 sm:grid-cols-3">
+          <div className="metric-tile">
+            <p className="metric-value">17+</p>
+            <p className="metric-label">Technique markers surfaced across a run recap.</p>
+          </div>
+          <div className="metric-tile">
+            <p className="metric-value">3</p>
+            <p className="metric-label">Core outputs: recap, key moments, and progress tracking.</p>
+          </div>
+          <div className="metric-tile">
+            <p className="metric-value">1</p>
+            <p className="metric-label">Single upload to start the whole coaching loop.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="surface-card-strong p-6 lg:p-8 self-start">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>
+              {mode === 'login' ? 'Welcome back' : 'Create your account'}
+            </p>
+            <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+              {mode === 'login' ? 'Review your latest run' : 'Start your first analysis'}
+            </h2>
+          </div>
+          <span className="status-pill" style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}>
+            {mode === 'login' ? 'Return' : 'New athlete'}
+          </span>
+        </div>
+
+        <p className="mt-3 text-sm" style={{ color: 'var(--ink-soft)' }}>
+          {mode === 'login'
+            ? 'Sign in to open your coaching hub, latest recap, and saved runs.'
+            : 'Create an account so your uploads, results, and coaching cards stay synced.'}
+        </p>
+
+        <form onSubmit={handleSubmit} className="mt-7 space-y-4">
+          <div>
+            <label className="field-label">Email</label>
+            <input
+              type="email"
+              required
+              autoComplete="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="text-input"
+            />
+          </div>
+
+          <div>
+            <label className="field-label">Password</label>
+            <input
+              type="password"
+              required
+              minLength={6}
+              placeholder="••••••••"
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="text-input"
+            />
+          </div>
+
+          {message && (
+            <div
+              className="rounded-2xl px-4 py-3 text-sm"
+              style={{
+                background: message.kind === 'error' ? 'var(--danger-dim)' : 'var(--success-dim)',
+                color: message.kind === 'error' ? 'var(--danger)' : 'var(--success)',
+                border: `1px solid ${message.kind === 'error' ? 'rgba(239,83,80,0.2)' : 'rgba(76,175,130,0.2)'}`,
+              }}
+            >
+              {message.text}
+            </div>
+          )}
+
+          <button type="submit" disabled={loading} className="cta-primary w-full">
+            {loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
+          </button>
+        </form>
+
+        <div
+          className="mt-6 rounded-[1.4rem] px-4 py-4"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--line-soft)' }}
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--ink-muted)' }}>
+            The coaching loop
+          </p>
+          <div className="mt-3 space-y-3 text-sm" style={{ color: 'var(--ink-base)' }}>
+            <div className="flex items-center justify-between">
+              <span>Upload your run</span>
+              <span style={{ color: 'var(--ink-muted)' }}>01</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Review technique recap</span>
+              <span style={{ color: 'var(--ink-muted)' }}>02</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Focus on what matters next</span>
+              <span style={{ color: 'var(--ink-muted)' }}>03</span>
+            </div>
           </div>
         </div>
 
-        <h1 className="text-2xl font-bold text-center text-white mb-1">
-          {mode === 'login' ? 'Welcome back' : 'Create your account'}
-        </h1>
-        <p className="text-sm text-center mb-8" style={{ color: 'rgba(255,255,255,0.4)' }}>
-          {mode === 'login'
-            ? 'Sign in to review your ski analysis'
-            : 'Start analysing your ski technique'}
-        </p>
-
-        <div className="card p-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                Email
-              </label>
-              <input
-                type="email"
-                required
-                autoComplete="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="input-dark"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                Password
-              </label>
-              <input
-                type="password"
-                required
-                minLength={6}
-                placeholder="••••••••"
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="input-dark"
-              />
-            </div>
-
-            {message && (
-              <div
-                className="text-sm rounded-xl px-4 py-3"
-                style={{
-                  background: message.kind === 'error'
-                    ? 'rgba(239,68,68,0.12)'
-                    : 'rgba(34,208,122,0.12)',
-                  color: message.kind === 'error' ? '#F87171' : '#4ADE80',
-                  border: `1px solid ${message.kind === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(34,208,122,0.3)'}`,
-                }}
-              >
-                {message.text}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-primary w-full mt-2"
-              style={{ padding: '0.75rem 1.25rem' }}
-            >
-              {loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
-            </button>
-          </form>
-        </div>
-
-        <p className="text-sm text-center mt-5" style={{ color: 'rgba(255,255,255,0.35)' }}>
+        <p className="mt-5 text-sm" style={{ color: 'var(--ink-soft)' }}>
           {mode === 'login' ? (
             <>
-              No account?{' '}
+              No account yet?{' '}
               <button
                 onClick={() => { setMode('signup'); setMessage(null) }}
-                className="font-medium hover:underline"
-                style={{ color: 'var(--accent)' }}
+                className="font-semibold hover:underline"
+                style={{ color: 'var(--ink-strong)' }}
               >
-                Sign up
+                Create one
               </button>
             </>
           ) : (
             <>
-              Already have an account?{' '}
+              Already tracking runs?{' '}
               <button
                 onClick={() => { setMode('login'); setMessage(null) }}
-                className="font-medium hover:underline"
-                style={{ color: 'var(--accent)' }}
+                className="font-semibold hover:underline"
+                style={{ color: 'var(--ink-strong)' }}
               >
                 Sign in
               </button>
             </>
           )}
         </p>
-      </div>
+      </section>
     </div>
   )
 }

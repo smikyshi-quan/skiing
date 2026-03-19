@@ -7,6 +7,7 @@ export interface Job {
   video_object_path: string | null
   result_prefix: string | null
   config: Record<string, unknown>
+  score: number | null
   error: string | null
   created_at: string
   updated_at: string

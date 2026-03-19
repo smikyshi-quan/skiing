@@ -21,20 +21,28 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}))
-  const { filename } = body
+  const { filename, cameraPerspective, sessionType } = body
   if (!filename || typeof filename !== 'string') {
     return NextResponse.json({ error: '`filename` is required' }, { status: 400 })
   }
 
   const service = createServiceClient()
 
-  // 2. Insert job row
+  // 2. Insert job row — persist upload config fields
+  const config: Record<string, unknown> = { original_filename: filename }
+  if (typeof cameraPerspective === 'string' && cameraPerspective) {
+    config.camera_perspective = cameraPerspective
+  }
+  if (typeof sessionType === 'string' && sessionType) {
+    config.session_type = sessionType
+  }
+
   const { data: job, error: jobError } = await service
     .from('jobs')
     .insert({
       user_id: user.id,
       status: 'created',
-      config: { original_filename: filename },
+      config,
     })
     .select()
     .single()

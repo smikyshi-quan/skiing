@@ -24,6 +24,25 @@ const LABEL: Record<Step, string> = {
   error: '',
 }
 
+const CAMERA_OPTIONS = [
+  { value: '', label: 'Select perspective…' },
+  { value: 'side', label: 'Side view' },
+  { value: 'behind', label: 'Behind / follow cam' },
+  { value: 'front', label: 'Front facing' },
+  { value: 'above', label: 'Overhead / drone' },
+  { value: 'other', label: 'Other' },
+]
+
+const SESSION_OPTIONS = [
+  { value: '', label: 'Select session type…' },
+  { value: 'free_skiing', label: 'Free skiing' },
+  { value: 'slalom', label: 'Slalom' },
+  { value: 'giant_slalom', label: 'Giant slalom' },
+  { value: 'super_g', label: 'Super-G' },
+  { value: 'training_drill', label: 'Training drill' },
+  { value: 'other', label: 'Other' },
+]
+
 export default function UploadPage() {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -32,6 +51,8 @@ export default function UploadPage() {
   const [step, setStep] = useState<Step>('idle')
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
+  const [cameraPerspective, setCameraPerspective] = useState('')
+  const [sessionType, setSessionType] = useState('')
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault()
@@ -44,7 +65,11 @@ export default function UploadPage() {
       const createRes = await fetch('/api/jobs/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: file.name }),
+        body: JSON.stringify({
+          filename: file.name,
+          cameraPerspective: cameraPerspective || undefined,
+          sessionType: sessionType || undefined,
+        }),
       })
       if (!createRes.ok) {
         const { error: msg } = await createRes.json()
@@ -95,131 +120,200 @@ export default function UploadPage() {
   }
 
   const busy = step !== 'idle' && step !== 'done' && step !== 'error'
+  const flow = [
+    'Upload a clean clip from one continuous run.',
+    'We queue overlay render, peak moments, and summary artifacts.',
+    'Open the run recap to review feedback and next priorities.',
+  ]
 
   return (
-    <div className="max-w-lg">
-      {/* Page header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white tracking-tight">Analyse a run</h1>
-        <p className="mt-2 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
-          Upload your ski video and get AI-powered technique analysis
+    <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+      <section className="surface-card p-8 lg:p-10">
+        <span className="eyebrow">Upload analysis</span>
+        <h1 className="section-title mt-6">Turn a raw clip into a sharper practice session.</h1>
+        <p className="section-copy mt-4 max-w-xl">
+          One upload creates a job, queues the worker, and opens a run-detail page with overlay video, key moments, and recap-ready artifacts.
         </p>
-      </div>
 
-      <form onSubmit={handleUpload} className="space-y-5">
-        {/* Drop zone */}
-        <div
-          onClick={() => !busy && fileRef.current?.click()}
-          onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={e => {
-            e.preventDefault()
-            setDragOver(false)
-            handleFilePick(e.dataTransfer.files?.[0] ?? null)
-          }}
-          className="relative rounded-2xl p-10 text-center cursor-pointer select-none transition-all"
-          style={{
-            border: `2px dashed ${dragOver ? 'var(--accent)' : file ? 'rgba(79,142,255,0.5)' : 'rgba(255,255,255,0.12)'}`,
-            background: dragOver
-              ? 'var(--accent-dim)'
-              : file
-              ? 'rgba(79,142,255,0.06)'
-              : 'var(--bg-surface)',
-          }}
-        >
-          {file ? (
-            <div className="space-y-1">
-              {/* Video icon */}
-              <div className="flex justify-center mb-3">
-                <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center"
-                  style={{ background: 'var(--accent-dim)' }}
-                >
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
-                  </svg>
-                </div>
-              </div>
-              <p className="text-sm font-semibold text-white truncate px-4">{file.name}</p>
-              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                {(file.size / 1024 / 1024).toFixed(1)} MB
-              </p>
-              <button
-                type="button"
-                onClick={e => { e.stopPropagation(); setFile(null); setStep('idle'); if (fileRef.current) fileRef.current.value = '' }}
-                className="mt-3 text-xs px-3 py-1 rounded-lg"
-                style={{ color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.07)' }}
+        <div className="mt-8 grid gap-4 sm:grid-cols-3">
+          <div className="metric-tile">
+            <p className="metric-value">1</p>
+            <p className="metric-label">Continuous clip for the cleanest recap.</p>
+          </div>
+          <div className="metric-tile">
+            <p className="metric-value">50MB</p>
+            <p className="metric-label">Recommended upload ceiling for a fast handoff.</p>
+          </div>
+          <div className="metric-tile">
+            <p className="metric-value">3</p>
+            <p className="metric-label">Outputs to review: overlay, moments, and summary.</p>
+          </div>
+        </div>
+
+        <div className="mt-8 grid gap-3">
+          {flow.map((stepLabel, index) => (
+            <div
+              key={stepLabel}
+              className="surface-card-muted px-4 py-4 flex items-start gap-4"
+            >
+              <span
+                className="shrink-0 inline-flex w-9 h-9 items-center justify-center rounded-full text-sm font-bold"
+                style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}
               >
-                Change file
-              </button>
+                0{index + 1}
+              </span>
+              <p className="text-sm leading-6" style={{ color: 'var(--ink-base)' }}>
+                {stepLabel}
+              </p>
             </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex justify-center">
-                <div
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                  style={{ background: 'rgba(255,255,255,0.05)' }}
+          ))}
+        </div>
+      </section>
+
+      <section className="surface-card-strong p-6 lg:p-8">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Run intake</p>
+            <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+              Drop your next video
+            </h2>
+          </div>
+          <span className="status-pill" style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}>
+            Worker queue
+          </span>
+        </div>
+
+        <form onSubmit={handleUpload} className="mt-6 space-y-5">
+          <div
+            onClick={() => !busy && fileRef.current?.click()}
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => {
+              e.preventDefault()
+              setDragOver(false)
+              handleFilePick(e.dataTransfer.files?.[0] ?? null)
+            }}
+            className="relative rounded-[1.7rem] p-10 text-center cursor-pointer select-none transition-all"
+            style={{
+              border: `2px dashed ${dragOver ? 'rgba(79,195,247,0.7)' : file ? 'rgba(79,195,247,0.3)' : 'var(--line-strong)'}`,
+              background: dragOver
+                ? 'rgba(79,195,247,0.08)'
+                : file
+                ? 'rgba(79,195,247,0.04)'
+                : 'rgba(255,255,255,0.03)',
+            }}
+          >
+            {file ? (
+              <div className="space-y-2">
+                <div className="flex justify-center mb-2">
+                  <div
+                    className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                    style={{ background: 'var(--accent-dim)' }}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+                    </svg>
+                  </div>
+                </div>
+                <p className="text-base font-semibold px-4 break-all" style={{ color: 'var(--ink-strong)' }}>{file.name}</p>
+                <p className="text-sm" style={{ color: 'var(--ink-soft)' }}>
+                  {(file.size / 1024 / 1024).toFixed(1)} MB selected
+                </p>
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); setFile(null); setStep('idle'); if (fileRef.current) fileRef.current.value = '' }}
+                  className="cta-secondary mt-2"
                 >
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                  </svg>
+                  Change file
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex justify-center">
+                  <div
+                    className="w-16 h-16 rounded-[1.4rem] flex items-center justify-center"
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--line-soft)' }}
+                  >
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ink-muted)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                    </svg>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-base font-semibold" style={{ color: 'var(--ink-strong)' }}>Drop your video here</p>
+                  <p className="text-sm mt-1" style={{ color: 'var(--ink-soft)' }}>
+                    MP4, MOV, or AVI · best with one skier and one continuous run
+                  </p>
                 </div>
               </div>
-              <div>
-                <p className="text-sm font-medium text-white">Drop your video here</p>
-                <p className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                  or click to browse — MP4, MOV, AVI · Max 50 MB
-                </p>
+            )}
+
+            <input
+              ref={fileRef}
+              type="file"
+              accept="video/*"
+              className="hidden"
+              onChange={e => handleFilePick(e.target.files?.[0] ?? null)}
+            />
+          </div>
+
+          {/* Camera perspective & session type */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="field-label">Camera perspective</label>
+              <select
+                value={cameraPerspective}
+                onChange={e => setCameraPerspective(e.target.value)}
+                className="select-input"
+                disabled={busy}
+              >
+                {CAMERA_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="field-label">Session type</label>
+              <select
+                value={sessionType}
+                onChange={e => setSessionType(e.target.value)}
+                className="select-input"
+                disabled={busy}
+              >
+                {SESSION_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {(busy || step === 'done') && (
+            <div className="space-y-2">
+              <div className="progress-track">
+                <div className="progress-fill transition-all duration-500" style={{ width: `${PROGRESS[step]}%` }} />
               </div>
+              <p className="text-sm" style={{ color: 'var(--ink-soft)' }}>{LABEL[step]}</p>
             </div>
           )}
 
-          <input
-            ref={fileRef}
-            type="file"
-            accept="video/*"
-            className="hidden"
-            onChange={e => handleFilePick(e.target.files?.[0] ?? null)}
-          />
-        </div>
-
-        {/* Progress bar */}
-        {(busy || step === 'done') && (
-          <div className="space-y-2">
-            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{ width: `${PROGRESS[step]}%`, background: 'var(--accent)' }}
-              />
+          {error && (
+            <div
+              className="rounded-2xl px-4 py-3 text-sm"
+              style={{ background: 'var(--danger-dim)', color: 'var(--danger)', border: '1px solid rgba(239,83,80,0.2)' }}
+            >
+              {error}
             </div>
-            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{LABEL[step]}</p>
-          </div>
-        )}
+          )}
 
-        {/* Error */}
-        {error && (
-          <div
-            className="text-sm rounded-xl px-4 py-3"
-            style={{
-              background: 'rgba(239,68,68,0.1)',
-              color: '#F87171',
-              border: '1px solid rgba(239,68,68,0.25)',
-            }}
+          <button
+            type="submit"
+            disabled={!file || busy || step === 'done'}
+            className="cta-primary w-full"
           >
-            {error}
-          </div>
-        )}
-
-        {/* CTA */}
-        <button
-          type="submit"
-          disabled={!file || busy || step === 'done'}
-          className="btn-primary w-full text-base"
-          style={{ padding: '0.875rem 1.25rem', fontSize: '0.9375rem' }}
-        >
-          {busy ? LABEL[step] : 'Start analysis'}
-        </button>
-      </form>
+            {busy ? LABEL[step] : 'Start analysis'}
+          </button>
+        </form>
+      </section>
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { buildTechniqueDashboard, type TechniqueRunSummary } from '@/lib/analysis-summary'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 
 export async function GET(
@@ -51,5 +52,53 @@ export async function GET(
     })
   )
 
-  return NextResponse.json({ job, artifacts: artifactsWithUrls })
+  let summary: TechniqueRunSummary | null = null
+  const summaryArtifact = (artifacts ?? []).find((artifact) => artifact.kind === 'summary_json')
+
+  if (summaryArtifact) {
+    const { data: summaryFile } = await service.storage
+      .from('artifacts')
+      .download(summaryArtifact.object_path)
+
+    if (summaryFile) {
+      try {
+        summary = JSON.parse(await summaryFile.text()) as TechniqueRunSummary
+      } catch (error) {
+        console.error('summary parse error:', error)
+      }
+    }
+  }
+
+  // Persist score if summary exists and job.score is not yet set
+  if (summary && job.score == null && job.status === 'done') {
+    const dashboard = buildTechniqueDashboard(summary)
+    const computedScore = dashboard.overview.overallScore
+    if (Number.isFinite(computedScore)) {
+      await service
+        .from('jobs')
+        .update({ score: computedScore })
+        .eq('id', jobId)
+      job.score = computedScore
+    }
+  }
+
+  // Find previous completed run's score for delta
+  let previousScore: number | null = null
+  if (job.status === 'done') {
+    const { data: prevJobs } = await service
+      .from('jobs')
+      .select('score')
+      .eq('user_id', user.id)
+      .eq('status', 'done')
+      .lt('created_at', job.created_at)
+      .not('score', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (prevJobs?.length && prevJobs[0].score != null) {
+      previousScore = prevJobs[0].score
+    }
+  }
+
+  return NextResponse.json({ job, artifacts: artifactsWithUrls, summary, previousScore })
 }
