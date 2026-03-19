@@ -26,7 +26,6 @@ const LABEL: Record<Step, string> = {
 
 export default function UploadPage() {
   const router = useRouter()
-  const supabase = createClient()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [file, setFile] = useState<File | null>(null)
@@ -40,6 +39,7 @@ export default function UploadPage() {
     setError(null)
 
     try {
+      const supabase = createClient()
       setStep('creating')
       const createRes = await fetch('/api/jobs/create', {
         method: 'POST',

@@ -8,7 +8,6 @@ type Mode = 'login' | 'signup'
 
 export default function LoginPage() {
   const router = useRouter()
-  const supabase = createClient()
 
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
@@ -21,6 +20,7 @@ export default function LoginPage() {
     setMessage(null)
     setLoading(true)
     try {
+      const supabase = createClient()
       if (mode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
