@@ -33,6 +33,14 @@ const CATEGORY_ICON: Record<string, string> = {
   general: 'General',
 }
 
+const CATEGORY_BADGE: Record<string, string> = {
+  balance: 'category-badge-balance',
+  edging: 'category-badge-edging',
+  rhythm: 'category-badge-rhythm',
+  movement: 'category-badge-movement',
+  general: 'category-badge-general',
+}
+
 function levelBadgeClass(label: string) {
   switch (label) {
     case 'Focus': return 'level-badge level-badge--focus'
@@ -155,7 +163,7 @@ export default async function HomePage() {
   return (
     <div className="space-y-6">
       {/* ── Hero section ─────────────────────────────── */}
-      <section className="surface-card p-8 lg:p-10">
+      <section className="surface-card hero-arc-bg p-8 lg:p-10">
         <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
           <div>
             <span className="eyebrow">Your coaching hub</span>
@@ -186,27 +194,31 @@ export default async function HomePage() {
           <div className="flex items-center justify-center">
             {score != null && level != null ? (
               <div className="text-center">
-                <div className="score-ring mx-auto" style={{ width: '10rem', height: '10rem' }}>
-                  <svg width="160" height="160" viewBox="0 0 160 160">
-                    <circle cx="80" cy="80" r="68" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
+                <div className="score-ring mx-auto" style={{ width: '11rem', height: '11rem' }}>
+                  <div className="score-ring-glow" />
+                  <svg width="176" height="176" viewBox="0 0 176 176">
+                    <circle cx="88" cy="88" r="74" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
                     <circle
-                      cx="80" cy="80" r="68"
+                      cx="88" cy="88" r="74"
                       fill="none"
-                      stroke="url(#scoreGrad)"
+                      stroke="url(#scoreGradHome)"
                       strokeWidth="8"
                       strokeLinecap="round"
-                      strokeDasharray="427.3"
-                      strokeDashoffset={427.3 - (score / 100) * 427.3}
+                      strokeDasharray="464.96"
+                      strokeDashoffset={464.96 - (score / 100) * 464.96}
                     />
                     <defs>
-                      <linearGradient id="scoreGrad" x1="0" y1="0" x2="1" y2="1">
-                        <stop offset="0%" stopColor="var(--accent)" />
-                        <stop offset="100%" stopColor="var(--gold)" />
+                      <linearGradient id="scoreGradHome" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stopColor="#4fc3f7" />
+                        <stop offset="100%" stopColor="#a78bfa" />
                       </linearGradient>
                     </defs>
                   </svg>
                   <div className="score-ring-label">
-                    <span className="text-4xl font-extrabold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+                    <span
+                      className="font-bold tracking-tight"
+                      style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', fontWeight: 700, color: 'var(--ink-strong)' }}
+                    >
                       {score}
                     </span>
                     <span className="text-xs mt-1" style={{ color: 'var(--ink-soft)' }}>
@@ -304,8 +316,8 @@ export default async function HomePage() {
         <section className="surface-card-strong p-6">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Primary focus</p>
-              <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+              <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Primary focus</p>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
                 {primaryTip ? primaryTip.title : 'Your next focus'}
               </h2>
             </div>
@@ -349,8 +361,8 @@ export default async function HomePage() {
         <section className="surface-card p-6">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>What next?</p>
-              <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+              <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>What next?</p>
+              <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
                 Next session
               </h2>
             </div>
@@ -366,26 +378,22 @@ export default async function HomePage() {
           {nextSession.drills.length > 0 ? (
             <div className="mt-5 space-y-3">
               {nextSession.drills.map((drill) => (
-                <div key={drill.id} className="surface-card-muted p-4">
-                  <div className="flex items-center justify-between gap-3">
+                <div key={drill.id} className={`coaching-card coaching-accent-${drill.category}`}>
+                  <div className="flex items-center justify-between gap-3 pl-3">
                     <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>
                       {drill.title}
                     </p>
                     <span
-                      className="text-xs font-semibold px-2 py-0.5 rounded-full shrink-0"
-                      style={{
-                        color: 'var(--accent)',
-                        background: 'var(--accent-dim)',
-                      }}
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${CATEGORY_BADGE[drill.category] ?? 'category-badge-general'}`}
                     >
                       {CATEGORY_ICON[drill.category] ?? drill.category}
                     </span>
                   </div>
-                  <p className="mt-2 text-sm leading-6" style={{ color: 'var(--ink-soft)' }}>
+                  <p className="mt-2 text-sm leading-6 pl-3" style={{ color: 'var(--ink-soft)' }}>
                     {drill.description}
                   </p>
                   {drill.priority > 1 && (
-                    <p className="mt-2 text-xs font-semibold" style={{ color: 'var(--gold)' }}>
+                    <p className="mt-2 text-xs font-semibold pl-3" style={{ color: 'var(--gold)' }}>
                       Recurring across {drill.priority} recent runs
                     </p>
                   )}
@@ -404,8 +412,8 @@ export default async function HomePage() {
       <section className="surface-card p-6">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Recent runs</p>
-            <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+            <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Recent runs</p>
+            <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
               Archive
             </h2>
           </div>

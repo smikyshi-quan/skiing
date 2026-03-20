@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { LogoutButton } from '@/components/logout-button'
+import { NavLinks } from '@/components/nav-links'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -22,11 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </span>
             </Link>
 
-            <nav className="topnav">
-              <Link href="/upload" className="topnav-link">Analyse</Link>
-              <Link href="/jobs" className="topnav-link">Archive</Link>
-              <LogoutButton />
-            </nav>
+            <NavLinks />
           </header>
 
           <main className="page-shell">{children}</main>

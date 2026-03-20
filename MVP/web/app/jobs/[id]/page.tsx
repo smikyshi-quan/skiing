@@ -69,6 +69,23 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'downloads', label: 'Downloads' },
 ]
 
+const CATEGORY_COLORS: Record<string, { accent: string; badge: string }> = {
+  balance: { accent: 'coaching-accent-balance', badge: 'category-badge-balance' },
+  edging: { accent: 'coaching-accent-edging', badge: 'category-badge-edging' },
+  rhythm: { accent: 'coaching-accent-rhythm', badge: 'category-badge-rhythm' },
+  movement: { accent: 'coaching-accent-movement', badge: 'category-badge-movement' },
+  general: { accent: 'coaching-accent-general', badge: 'category-badge-general' },
+}
+
+function tipCategory(tip: CoachingTip): string {
+  const text = `${tip.title} ${tip.explanation}`.toLowerCase()
+  if (text.includes('rotat') || text.includes('upper body') || text.includes('quiet') || text.includes('counter')) return 'movement'
+  if (text.includes('edge') || text.includes('carv') || text.includes('angulat') || text.includes('tilt')) return 'edging'
+  if (text.includes('rhythm') || text.includes('tempo') || text.includes('timing') || text.includes('flow') || text.includes('pace')) return 'rhythm'
+  if (text.includes('stance') || text.includes('balance') || text.includes('center') || text.includes('weight') || text.includes('narrow') || text.includes('wide')) return 'balance'
+  return 'movement'
+}
+
 function signedDownloads(artifacts: ArtifactWithUrl[]) {
   return [
     { label: 'Overlay video', artifact: artifacts.find((artifact) => artifact.kind === 'video_overlay') },
@@ -98,6 +115,14 @@ function coachingHeadline(job: Job, summary: TechniqueRunSummary | null) {
     return 'This run did not complete. A cleaner single-athlete clip usually gets the recap back on track.'
   }
   return 'Your run is progressing through the queue. The recap will refresh automatically.'
+}
+
+function metricTierClass(value: number, threshold: number): string {
+  return value >= threshold ? 'metric-tile metric-tile--high' : 'metric-tile metric-tile--low'
+}
+
+function metricDotColor(value: number, threshold: number): string {
+  return value >= threshold ? 'var(--accent)' : 'var(--gold)'
 }
 
 export default function JobDetailPage() {
@@ -186,12 +211,17 @@ export default function JobDetailPage() {
   const level = score != null ? scoreLabel(score) : null
   const scoreDelta = score != null && previousScore != null ? score - previousScore : null
 
+  const breadcrumbName =
+    String(job.config?.original_filename ?? '') ||
+    job.video_object_path?.split('/').pop() ||
+    job.id.slice(0, 8)
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
         <Link href="/jobs" className="hover:underline">Archive</Link>
         <span>/</span>
-        <span className="font-mono" style={{ color: 'var(--ink-strong)' }}>{job.id.slice(0, 8)}</span>
+        <span className="font-mono" style={{ color: 'var(--ink-strong)' }}>{breadcrumbName}</span>
       </div>
 
       {/* ── Score-first hero ─────────────────────────── */}
@@ -200,29 +230,58 @@ export default function JobDetailPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="space-y-3">
-                <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-4 flex-wrap">
                   {score != null && (
-                    <span className="text-5xl font-extrabold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
-                      {score}
-                    </span>
+                    <div className="score-ring" style={{ width: '11.25rem', height: '11.25rem' }}>
+                      <div className="score-ring-glow" />
+                      <svg width="180" height="180" viewBox="0 0 180 180">
+                        <circle cx="90" cy="90" r="76" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
+                        <circle
+                          cx="90" cy="90" r="76"
+                          fill="none"
+                          stroke="url(#scoreGradDetail)"
+                          strokeWidth="8"
+                          strokeLinecap="round"
+                          strokeDasharray="477.52"
+                          strokeDashoffset={477.52 - (score / 100) * 477.52}
+                        />
+                        <defs>
+                          <linearGradient id="scoreGradDetail" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stopColor="#4fc3f7" />
+                            <stop offset="100%" stopColor="#a78bfa" />
+                          </linearGradient>
+                        </defs>
+                      </svg>
+                      <div className="score-ring-label">
+                        <span
+                          className="font-bold tracking-tight"
+                          style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', fontWeight: 700, color: 'var(--ink-strong)' }}
+                        >
+                          {score}
+                        </span>
+                        <span className="text-xs mt-1" style={{ color: 'var(--ink-soft)' }}>technique</span>
+                      </div>
+                    </div>
                   )}
-                  {level && (
-                    <span className={levelBadgeClass(level)}>{level}</span>
-                  )}
-                  {scoreDelta != null && (
-                    <span
-                      className="text-sm font-bold px-2.5 py-1 rounded-full"
-                      style={{
-                        color: scoreDelta >= 0 ? 'var(--success)' : 'var(--danger)',
-                        background: scoreDelta >= 0 ? 'var(--success-dim)' : 'var(--danger-dim)',
-                      }}
-                    >
-                      {scoreDelta >= 0 ? '+' : ''}{scoreDelta} vs prev
-                    </span>
-                  )}
+                  <div className="space-y-2">
+                    {level && (
+                      <span className={levelBadgeClass(level)}>{level}</span>
+                    )}
+                    {scoreDelta != null && (
+                      <span
+                        className="text-sm font-bold px-2.5 py-1 rounded-full block w-fit"
+                        style={{
+                          color: scoreDelta >= 0 ? 'var(--success)' : 'var(--danger)',
+                          background: scoreDelta >= 0 ? 'var(--success-dim)' : 'var(--danger-dim)',
+                        }}
+                      >
+                        {scoreDelta >= 0 ? '+' : ''}{scoreDelta} vs prev
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <span className="eyebrow">Run recap</span>
-                <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+                <h1 style={{ fontSize: 'clamp(1.8rem, 3vw, 2.8rem)', fontWeight: 700, letterSpacing: '-0.06em', color: 'var(--ink-strong)' }}>
                   {score != null ? headline.slice(0, 80) : 'Review how this run moved.'}
                 </h1>
               </div>
@@ -234,14 +293,14 @@ export default function JobDetailPage() {
             {overlayArtifact?.url ? (
               <div
                 className="overflow-hidden rounded-[1.6rem]"
-                style={{ background: '#0a0f1a', border: '1px solid var(--line-soft)' }}
+                style={{ background: '#0a0f1a', border: '1px solid rgba(255,255,255,0.07)' }}
               >
                 <video src={overlayArtifact.url} controls playsInline className="w-full aspect-video bg-black" />
               </div>
             ) : (
               <div
                 className="rounded-[1.6rem] aspect-video flex items-center justify-center text-center p-8"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--line-soft)', color: 'var(--ink-soft)' }}
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', color: 'var(--ink-soft)' }}
               >
                 Overlay video will appear here once the run is fully processed.
               </div>
@@ -258,8 +317,11 @@ export default function JobDetailPage() {
               </p>
 
               <div className="mt-5 grid grid-cols-2 gap-3">
-                <div className="metric-tile">
-                  <p className="metric-value">{dashboard ? dashboard.overview.overallScore : '—'}</p>
+                <div className={dashboard && dashboard.overview.overallScore > 60 ? 'metric-tile metric-tile--high' : dashboard ? 'metric-tile metric-tile--low' : 'metric-tile'}>
+                  <div className="metric-tile-dot" style={{ background: dashboard ? metricDotColor(dashboard.overview.overallScore, 60) : 'var(--ink-muted)' }} />
+                  <p className="metric-value" style={{ color: dashboard && dashboard.overview.overallScore > 60 ? 'var(--accent)' : 'var(--gold)' }}>
+                    {dashboard ? dashboard.overview.overallScore : '—'}
+                  </p>
                   <p className="metric-label">Technique score</p>
                 </div>
                 <div className="metric-tile">
@@ -270,8 +332,11 @@ export default function JobDetailPage() {
                   <p className="metric-value">{dashboard ? `${dashboard.overview.edgeAngle.toFixed(0)}°` : '—'}</p>
                   <p className="metric-label">Average edge angle</p>
                 </div>
-                <div className="metric-tile">
-                  <p className="metric-value">{dashboard ? `${dashboard.overview.poseConfidence.toFixed(0)}%` : '—'}</p>
+                <div className={dashboard && dashboard.overview.poseConfidence > 70 ? 'metric-tile metric-tile--high' : dashboard ? 'metric-tile metric-tile--low' : 'metric-tile'}>
+                  <div className="metric-tile-dot" style={{ background: dashboard ? metricDotColor(dashboard.overview.poseConfidence, 70) : 'var(--ink-muted)' }} />
+                  <p className="metric-value" style={{ color: dashboard && dashboard.overview.poseConfidence > 70 ? 'var(--accent)' : 'var(--gold)' }}>
+                    {dashboard ? `${dashboard.overview.poseConfidence.toFixed(0)}%` : '—'}
+                  </p>
                   <p className="metric-label">Pose confidence</p>
                 </div>
               </div>
@@ -357,8 +422,8 @@ export default function JobDetailPage() {
           <section className="surface-card p-6">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Run recap</p>
-                <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Run recap</p>
+                <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
                   What stands out first
                 </h2>
               </div>
@@ -415,8 +480,8 @@ export default function JobDetailPage() {
           <section className="surface-card p-6">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Next focus</p>
-                <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Next focus</p>
+                <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
                   Practice cards
                 </h2>
               </div>
@@ -427,21 +492,36 @@ export default function JobDetailPage() {
 
             <div className="mt-5 space-y-3">
               {(dashboard?.focusCards.length ? dashboard.focusCards : summary?.coaching_tips ?? []).slice(0, 4).map((tip) => {
-                const tone = TIP_META[tip.severity]
+                const category = tipCategory(tip)
+                const catColors = CATEGORY_COLORS[category] ?? CATEGORY_COLORS.general
+                const CATEGORY_LABELS: Record<string, string> = {
+                  movement: 'Movement', edging: 'Edging', rhythm: 'Rhythm', balance: 'Balance', general: 'General',
+                }
                 return (
-                  <div key={`${tip.title}-${tip.evidence}`} className="surface-card-muted p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-base font-semibold" style={{ color: 'var(--ink-strong)' }}>{tip.title}</p>
-                      <span className="status-pill" style={{ color: tone.color, background: tone.background }}>
-                        {tone.label}
+                  <div key={`${tip.title}-${tip.evidence}`} className={`coaching-card ${catColors.accent}`}>
+                    <div className="flex items-center justify-between gap-3 pl-3">
+                      <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>{tip.title}</p>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${catColors.badge}`}>
+                        {CATEGORY_LABELS[category]}
                       </span>
                     </div>
-                    <p className="mt-2 text-sm leading-6" style={{ color: 'var(--ink-base)' }}>
+                    <p className="mt-2 text-sm leading-6 pl-3" style={{ color: 'var(--ink-base)' }}>
                       {tip.explanation}
                     </p>
-                    <p className="mt-2 text-xs" style={{ color: 'var(--ink-muted)' }}>
+                    <p className="mt-2 text-xs pl-3" style={{ color: 'var(--ink-muted)' }}>
                       {tip.evidence}
                     </p>
+                    <Link
+                      href="#"
+                      className="mt-2 inline-flex items-center gap-1 text-xs pl-3"
+                      style={{ color: 'var(--accent)' }}
+                      onClick={(e) => { e.preventDefault(); setActiveTab('moments') }}
+                    >
+                      Watch
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 12h14M12 5l7 7-7 7" />
+                      </svg>
+                    </Link>
                   </div>
                 )
               })}
@@ -485,12 +565,14 @@ export default function JobDetailPage() {
                   {category.metrics.map((metric) => (
                     <div key={`${category.id}-${metric.label}`}>
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>{metric.label}</p>
-                        <p className="text-sm" style={{ color: 'var(--ink-soft)' }}>{metric.value}</p>
+                        <p className="text-sm font-semibold" style={{ color: 'var(--snow-100)' }}>{metric.label}</p>
+                        <p className="font-mono text-xs" style={{ color: 'var(--accent)' }}>{metric.value}</p>
                       </div>
                       <p className="mt-1 text-sm" style={{ color: 'var(--ink-soft)' }}>{metric.helper}</p>
                       <div className="mt-3 metric-rail">
-                        <span style={{ width: `${metric.fill}%` }} />
+                        <span style={{ width: `${metric.fill}%` }}>
+                          <span className="metric-rail-dot" />
+                        </span>
                       </div>
                       <div className="mt-1 flex items-center justify-between text-xs" style={{ color: 'var(--ink-muted)' }}>
                         <span>{metric.leftLabel}</span>
@@ -511,8 +593,8 @@ export default function JobDetailPage() {
             <section className="surface-card p-6">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
-                  <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Turn highlights</p>
-                  <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+                  <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Turn highlights</p>
+                  <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
                     Best turns in this pass
                   </h2>
                 </div>
@@ -525,7 +607,7 @@ export default function JobDetailPage() {
                 {dashboard.turnHighlights.map((turn) => (
                   <div key={turn.title} className="surface-card-muted p-4">
                     <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>{turn.title}</p>
-                    <p className="mt-3 text-3xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+                    <p className="mt-3 text-3xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)', fontVariantNumeric: 'tabular-nums' }}>
                       {turn.score}
                     </p>
                     <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>{turn.detail}</p>
@@ -542,8 +624,8 @@ export default function JobDetailPage() {
           <section className="surface-card p-6">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Key moments</p>
-                <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Key moments</p>
+                <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
                   Review the strongest still frames
                 </h2>
               </div>
@@ -560,17 +642,19 @@ export default function JobDetailPage() {
                     href={photo.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="surface-card-muted overflow-hidden block"
+                    className="moment-card"
                   >
                     <img
                       src={photo.url}
                       alt={`Turn ${(photo.meta.turn_idx ?? 0) + 1}`}
                       className="w-full aspect-[4/3] object-cover"
                     />
-                    <div className="px-4 py-3 text-sm" style={{ color: 'var(--ink-base)' }}>
-                      Turn {(photo.meta.turn_idx ?? 0) + 1}
-                      {photo.meta.side ? ` · ${photo.meta.side}` : ''}
-                      {photo.meta.timestamp_s != null ? ` · ${Number(photo.meta.timestamp_s).toFixed(1)}s` : ''}
+                    <div className="moment-card-overlay">
+                      <p className="text-xs font-mono text-white">
+                        Turn {(photo.meta.turn_idx ?? 0) + 1}
+                        {photo.meta.side ? ` · ${photo.meta.side}` : ''}
+                        {photo.meta.timestamp_s != null ? ` · ${Number(photo.meta.timestamp_s).toFixed(1)}s` : ''}
+                      </p>
                     </div>
                   </a>
                 ))}
@@ -585,8 +669,8 @@ export default function JobDetailPage() {
           <section className="surface-card p-6">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Peak pressure frames</p>
-                <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Peak pressure frames</p>
+                <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
                   Pressure snapshots across turns
                 </h2>
               </div>
@@ -603,17 +687,19 @@ export default function JobDetailPage() {
                     href={frame.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="surface-card-muted overflow-hidden block"
+                    className="moment-card"
                   >
                     <img
                       src={frame.url}
                       alt={`Turn ${(frame.meta.turn_idx ?? 0) + 1}`}
                       className="w-full aspect-[4/3] object-cover"
                     />
-                    <div className="px-4 py-3 text-sm" style={{ color: 'var(--ink-base)' }}>
-                      Turn {(frame.meta.turn_idx ?? 0) + 1}
-                      {frame.meta.side ? ` · ${frame.meta.side}` : ''}
-                      {frame.meta.timestamp_s != null ? ` · ${Number(frame.meta.timestamp_s).toFixed(1)}s` : ''}
+                    <div className="moment-card-overlay">
+                      <p className="text-xs font-mono text-white">
+                        Turn {(frame.meta.turn_idx ?? 0) + 1}
+                        {frame.meta.side ? ` · ${frame.meta.side}` : ''}
+                        {frame.meta.timestamp_s != null ? ` · ${Number(frame.meta.timestamp_s).toFixed(1)}s` : ''}
+                      </p>
                     </div>
                   </a>
                 ))}
@@ -631,8 +717,8 @@ export default function JobDetailPage() {
         <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
           <section className="surface-card p-6">
             <div>
-              <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Exports</p>
-              <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+              <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Exports</p>
+              <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
                 Raw files from this run
               </h2>
             </div>
@@ -666,8 +752,8 @@ export default function JobDetailPage() {
 
           <section className="surface-card p-6">
             <div>
-              <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Artifacts summary</p>
-              <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+              <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Artifacts summary</p>
+              <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
                 What this run produced
               </h2>
             </div>

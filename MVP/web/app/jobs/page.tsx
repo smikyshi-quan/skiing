@@ -41,7 +41,6 @@ export default async function ArchivePage() {
 
   const runs = (jobs ?? []) as Job[]
   const completedRuns = runs.filter((job) => job.status === 'done')
-  const activeRuns = runs.filter((job) => job.status === 'queued' || job.status === 'running' || job.status === 'uploaded')
 
   // Season grouping
   const seasonGroups = groupBySeason(runs)
@@ -127,10 +126,10 @@ export default async function ArchivePage() {
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-3">
                   <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>
+                    <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>
                       {group.runs.length} {group.runs.length === 1 ? 'run' : 'runs'}
                     </p>
-                    <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+                    <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
                       {group.label}
                     </h2>
                   </div>
@@ -168,11 +167,11 @@ export default async function ArchivePage() {
                     <li key={job.id}>
                       <Link
                         href={`/jobs/${job.id}`}
-                        className="surface-card-muted flex items-center gap-4 px-5 py-4 group transition-transform hover:-translate-y-0.5"
-                        style={{ display: 'flex' }}
+                        className="surface-card-muted flex items-center gap-4 px-5 py-4 group hover:-translate-y-0.5"
+                        style={{ display: 'flex', transition: 'transform 150ms ease, background 0.15s ease, border-color 0.15s ease' }}
                       >
                         <div
-                          className="w-11 h-11 rounded-[1rem] shrink-0 flex items-center justify-center"
+                          className="w-11 h-11 rounded-2xl shrink-0 flex items-center justify-center"
                           style={{ background: cfg.pill }}
                         >
                           {isRunning ? (
@@ -193,7 +192,7 @@ export default async function ArchivePage() {
                         </div>
 
                         {job.score != null && (
-                          <span className="text-sm font-bold shrink-0" style={{ color: 'var(--accent)' }}>
+                          <span className="text-sm font-bold shrink-0" style={{ color: 'var(--accent)', fontVariantNumeric: 'tabular-nums' }}>
                             {job.score}
                           </span>
                         )}
@@ -210,7 +209,7 @@ export default async function ArchivePage() {
                           viewBox="0 0 24 24" fill="none"
                           stroke="var(--ink-muted)"
                           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                          className="shrink-0 transition-all group-hover:translate-x-0.5"
+                          className="shrink-0 group-hover:translate-x-0.5"
                           style={{ transition: 'transform 150ms, stroke 150ms' }}
                         >
                           <path d="M9 18l6-6-6-6"/>

@@ -173,8 +173,8 @@ export default function UploadPage() {
       <section className="surface-card-strong p-6 lg:p-8">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>Run intake</p>
-            <h2 className="mt-1 text-2xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)' }}>
+            <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Run intake</p>
+            <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
               Drop your next video
             </h2>
           </div>
@@ -193,14 +193,19 @@ export default function UploadPage() {
               setDragOver(false)
               handleFilePick(e.dataTransfer.files?.[0] ?? null)
             }}
-            className="relative rounded-[1.7rem] p-10 text-center cursor-pointer select-none transition-all"
+            className="relative rounded-[1.7rem] p-10 text-center cursor-pointer select-none"
             style={{
-              border: `2px dashed ${dragOver ? 'rgba(79,195,247,0.7)' : file ? 'rgba(79,195,247,0.3)' : 'var(--line-strong)'}`,
-              background: dragOver
-                ? 'rgba(79,195,247,0.08)'
+              border: dragOver
+                ? '2px solid var(--accent)'
                 : file
-                ? 'rgba(79,195,247,0.04)'
-                : 'rgba(255,255,255,0.03)',
+                  ? '2px dashed rgba(79,195,247,0.3)'
+                  : '2px dashed rgba(79,195,247,0.2)',
+              background: dragOver
+                ? 'rgba(79,195,247,0.06)'
+                : file
+                  ? 'rgba(79,195,247,0.04)'
+                  : 'rgba(255,255,255,0.03)',
+              transition: 'all 0.2s ease',
             }}
           >
             {file ? (
@@ -231,10 +236,18 @@ export default function UploadPage() {
               <div className="space-y-4">
                 <div className="flex justify-center">
                   <div
-                    className="w-16 h-16 rounded-[1.4rem] flex items-center justify-center"
-                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--line-soft)' }}
+                    className={`w-16 h-16 rounded-[1.4rem] flex items-center justify-center ${dragOver ? 'drop-zone-icon-pulse' : ''}`}
+                    style={{
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '1px solid var(--line-soft)',
+                    }}
                   >
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ink-muted)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                    <svg
+                      width="28" height="28" viewBox="0 0 24 24" fill="none"
+                      stroke={dragOver ? 'var(--accent)' : 'var(--ink-muted)'}
+                      strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ opacity: dragOver ? 1 : 0.4, transition: 'opacity 0.2s ease' }}
+                    >
                       <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
                     </svg>
                   </div>
