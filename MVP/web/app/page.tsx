@@ -197,7 +197,7 @@ export default async function HomePage() {
                 <div className="score-ring mx-auto" style={{ width: '11rem', height: '11rem' }}>
                   <div className="score-ring-glow" />
                   <svg width="176" height="176" viewBox="0 0 176 176">
-                    <circle cx="88" cy="88" r="74" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
+                    <circle cx="88" cy="88" r="74" fill="none" stroke="rgba(31,42,51,0.06)" strokeWidth="8" />
                     <circle
                       cx="88" cy="88" r="74"
                       fill="none"
@@ -209,8 +209,8 @@ export default async function HomePage() {
                     />
                     <defs>
                       <linearGradient id="scoreGradHome" x1="0" y1="0" x2="1" y2="1">
-                        <stop offset="0%" stopColor="#4fc3f7" />
-                        <stop offset="100%" stopColor="#a78bfa" />
+                        <stop offset="0%" stopColor="#4f8fb3" />
+                        <stop offset="100%" stopColor="#c79a44" />
                       </linearGradient>
                     </defs>
                   </svg>
@@ -251,7 +251,7 @@ export default async function HomePage() {
               >
                 <div
                   className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--line-soft)' }}
+                  style={{ background: 'rgba(31,42,51,0.03)', border: '1px solid var(--line-soft)' }}
                 >
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ink-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
@@ -297,7 +297,7 @@ export default async function HomePage() {
                     className="flex-1 rounded-sm"
                     style={{
                       height: `${Math.max(20, (s / 100) * 100)}%`,
-                      background: i === recentTrend.length - 1 ? 'var(--accent)' : 'rgba(255,255,255,0.12)',
+                      background: i === recentTrend.length - 1 ? 'var(--accent)' : 'rgba(31,42,51,0.08)',
                     }}
                   />
                 ))}

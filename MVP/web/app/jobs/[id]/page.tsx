@@ -21,7 +21,7 @@ const STATUS_META: Record<JobStatus, { label: string; color: string; background:
   created: {
     label: 'Job created',
     color: 'var(--ink-soft)',
-    background: 'rgba(255,255,255,0.06)',
+    background: 'rgba(31,42,51,0.04)',
     helper: 'Your upload slot is ready.',
   },
   uploaded: {
@@ -59,7 +59,7 @@ const STATUS_META: Record<JobStatus, { label: string; color: string; background:
 const TIP_META: Record<CoachingTip['severity'], { label: string; color: string; background: string }> = {
   action: { label: 'Action', color: 'var(--gold)', background: 'var(--gold-dim)' },
   warn: { label: 'Watch', color: 'var(--accent)', background: 'var(--accent-dim)' },
-  info: { label: 'Note', color: 'var(--ink-soft)', background: 'rgba(255,255,255,0.06)' },
+  info: { label: 'Note', color: 'var(--ink-soft)', background: 'rgba(31,42,51,0.04)' },
 }
 
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -188,7 +188,7 @@ export default function JobDetailPage() {
   if (!data) {
     return (
       <div className="space-y-4 animate-pulse">
-        <div className="h-6 w-36 rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }} />
+        <div className="h-6 w-36 rounded-full" style={{ background: 'rgba(31,42,51,0.08)' }} />
         <div className="surface-card h-[24rem]" />
       </div>
     )
@@ -235,7 +235,7 @@ export default function JobDetailPage() {
                     <div className="score-ring" style={{ width: '11.25rem', height: '11.25rem' }}>
                       <div className="score-ring-glow" />
                       <svg width="180" height="180" viewBox="0 0 180 180">
-                        <circle cx="90" cy="90" r="76" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
+                        <circle cx="90" cy="90" r="76" fill="none" stroke="rgba(31,42,51,0.06)" strokeWidth="8" />
                         <circle
                           cx="90" cy="90" r="76"
                           fill="none"
@@ -247,8 +247,8 @@ export default function JobDetailPage() {
                         />
                         <defs>
                           <linearGradient id="scoreGradDetail" x1="0" y1="0" x2="1" y2="1">
-                            <stop offset="0%" stopColor="#4fc3f7" />
-                            <stop offset="100%" stopColor="#a78bfa" />
+                            <stop offset="0%" stopColor="#4f8fb3" />
+                            <stop offset="100%" stopColor="#c79a44" />
                           </linearGradient>
                         </defs>
                       </svg>
@@ -293,14 +293,14 @@ export default function JobDetailPage() {
             {overlayArtifact?.url ? (
               <div
                 className="overflow-hidden rounded-[1.6rem]"
-                style={{ background: '#0a0f1a', border: '1px solid rgba(255,255,255,0.07)' }}
+                style={{ background: '#0a0f1a', border: '1px solid var(--line-soft)' }}
               >
                 <video src={overlayArtifact.url} controls playsInline className="w-full aspect-video bg-black" />
               </div>
             ) : (
               <div
                 className="rounded-[1.6rem] aspect-video flex items-center justify-center text-center p-8"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', color: 'var(--ink-soft)' }}
+                style={{ background: 'rgba(31,42,51,0.03)', border: '1px solid var(--line-soft)', color: 'var(--ink-soft)' }}
               >
                 Overlay video will appear here once the run is fully processed.
               </div>
@@ -407,7 +407,7 @@ export default function JobDetailPage() {
             onClick={() => setActiveTab(tab.id)}
             className="rounded-full px-4 py-2 text-sm font-semibold transition-colors"
             style={{
-              background: activeTab === tab.id ? 'rgba(255,255,255,0.1)' : 'transparent',
+              background: activeTab === tab.id ? 'rgba(31,42,51,0.06)' : 'transparent',
               color: activeTab === tab.id ? 'var(--ink-strong)' : 'var(--ink-soft)',
               border: activeTab === tab.id ? '1px solid var(--line-soft)' : '1px solid transparent',
             }}
@@ -565,7 +565,7 @@ export default function JobDetailPage() {
                   {category.metrics.map((metric) => (
                     <div key={`${category.id}-${metric.label}`}>
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold" style={{ color: 'var(--snow-100)' }}>{metric.label}</p>
+                        <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>{metric.label}</p>
                         <p className="font-mono text-xs" style={{ color: 'var(--accent)' }}>{metric.value}</p>
                       </div>
                       <p className="mt-1 text-sm" style={{ color: 'var(--ink-soft)' }}>{metric.helper}</p>

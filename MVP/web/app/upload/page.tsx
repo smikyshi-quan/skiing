@@ -198,13 +198,13 @@ export default function UploadPage() {
               border: dragOver
                 ? '2px solid var(--accent)'
                 : file
-                  ? '2px dashed rgba(79,195,247,0.3)'
-                  : '2px dashed rgba(79,195,247,0.2)',
+                  ? '2px dashed rgba(79,143,179,0.3)'
+                  : '2px dashed rgba(79,143,179,0.2)',
               background: dragOver
-                ? 'rgba(79,195,247,0.06)'
+                ? 'rgba(79,143,179,0.06)'
                 : file
-                  ? 'rgba(79,195,247,0.04)'
-                  : 'rgba(255,255,255,0.03)',
+                  ? 'rgba(79,143,179,0.04)'
+                  : 'rgba(31,42,51,0.02)',
               transition: 'all 0.2s ease',
             }}
           >
@@ -238,7 +238,7 @@ export default function UploadPage() {
                   <div
                     className={`w-16 h-16 rounded-[1.4rem] flex items-center justify-center ${dragOver ? 'drop-zone-icon-pulse' : ''}`}
                     style={{
-                      background: 'rgba(255,255,255,0.06)',
+                      background: 'rgba(31,42,51,0.03)',
                       border: '1px solid var(--line-soft)',
                     }}
                   >

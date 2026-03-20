@@ -8,7 +8,7 @@ import { scoreLabel } from '@/lib/analysis-summary'
 export const dynamic = 'force-dynamic'
 
 const STATUS_CONFIG: Record<JobStatus, { label: string; dot: string; pill: string }> = {
-  created:  { label: 'Created',   dot: 'var(--ink-muted)',  pill: 'rgba(255,255,255,0.04)' },
+  created:  { label: 'Created',   dot: 'var(--ink-muted)',  pill: 'rgba(31,42,51,0.04)' },
   uploaded: { label: 'Uploaded',  dot: 'var(--accent)',     pill: 'var(--accent-dim)' },
   queued:   { label: 'Queued',    dot: 'var(--gold)',       pill: 'var(--gold-dim)' },
   running:  { label: 'Analysing', dot: 'var(--accent)',     pill: 'var(--accent-dim)' },
@@ -98,7 +98,7 @@ export default async function ArchivePage() {
           <div className="surface-card-muted p-10 text-center">
             <div
               className="w-16 h-16 rounded-[1.4rem] flex items-center justify-center mx-auto mb-4"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--line-soft)' }}
+              style={{ background: 'rgba(31,42,51,0.03)', border: '1px solid var(--line-soft)' }}
             >
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ink-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10"/>

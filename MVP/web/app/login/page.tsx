@@ -154,7 +154,7 @@ export default function LoginPage() {
 
         <div
           className="mt-6 rounded-[1.4rem] px-4 py-4"
-          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--line-soft)' }}
+          style={{ background: 'rgba(31,42,51,0.03)', border: '1px solid var(--line-soft)' }}
         >
           <p className="text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--ink-muted)' }}>
             The coaching loop
