@@ -19,8 +19,8 @@ export async function GET(
   const service = createServiceClient()
   const jobId = params.id
 
-  // Fetch job
-  const { data: job, error: jobError } = await service
+  // Fetch job using the session client — RLS scopes to the authenticated user
+  const { data: job, error: jobError } = await supabase
     .from('jobs')
     .select('*')
     .eq('id', jobId)
@@ -30,12 +30,7 @@ export async function GET(
     return NextResponse.json({ error: 'Job not found' }, { status: 404 })
   }
 
-  // Ownership check
-  if (job.user_id !== user.id) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
-  // Fetch artifacts
+  // Fetch artifacts — use service client for storage signing
   const { data: artifacts } = await service
     .from('artifacts')
     .select('*')

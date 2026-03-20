@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { randomUUID } from 'crypto'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 
 function safeUploadFilename(original: string) {
@@ -28,7 +29,11 @@ export async function POST(req: NextRequest) {
 
   const service = createServiceClient()
 
-  // 2. Insert job row — persist upload config fields
+  // 2. Pre-generate job ID so video_object_path is known at insert time
+  const jobId = randomUUID()
+  const safeFilename = safeUploadFilename(filename)
+  const storagePath = `${user.id}/${jobId}/${safeFilename}`
+
   const config: Record<string, unknown> = { original_filename: filename }
   if (typeof cameraPerspective === 'string' && cameraPerspective) {
     config.camera_perspective = cameraPerspective
@@ -40,8 +45,10 @@ export async function POST(req: NextRequest) {
   const { data: job, error: jobError } = await service
     .from('jobs')
     .insert({
+      id: jobId,
       user_id: user.id,
       status: 'created',
+      video_object_path: storagePath,
       config,
     })
     .select()
@@ -56,27 +63,19 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Generate signed upload URL  →  videos/<user_id>/<job_id>/<safe_filename>
-  // Supabase Storage validates object keys; user-provided filenames (Unicode, spaces, etc.)
-  // can break uploads. Store the original name in `jobs.config.original_filename`.
-  const safeFilename = safeUploadFilename(filename)
-  const storagePath = `${user.id}/${job.id}/${safeFilename}`
   const { data: signed, error: signedError } = await service.storage
     .from('videos')
     .createSignedUploadUrl(storagePath)
 
   if (signedError || !signed) {
     console.error('signed upload URL error:', signedError)
+    // Clean up the orphaned job row so no row remains without a valid upload path
+    await service.from('jobs').delete().eq('id', jobId)
     return NextResponse.json(
       { error: signedError?.message ?? 'Failed to create upload URL' },
       { status: 500 }
     )
   }
-
-  // 4. Persist the video path on the job so the worker can find it
-  await service
-    .from('jobs')
-    .update({ video_object_path: storagePath })
-    .eq('id', job.id)
 
   return NextResponse.json({
     jobId: job.id,

@@ -304,10 +304,20 @@ export default function JobDetailPage() {
                   <span style={{ color: 'var(--ink-soft)' }}>Auto refresh</span>
                 </div>
                 <div className="mt-3 progress-track">
-                  <div className="progress-fill" style={{ width: '68%' }} />
+                  <div
+                    className="progress-fill transition-all duration-700"
+                    style={{
+                      width: `${
+                        job.status === 'created' ? 10
+                        : job.status === 'uploaded' ? 20
+                        : job.status === 'queued' ? 30
+                        : 55
+                      }%`,
+                    }}
+                  />
                 </div>
                 <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                  {progressNote ?? 'We will refresh the recap as new artifacts are attached to this run.'}
+                  {progressNote ?? statusMeta.helper}
                 </p>
               </div>
             )}

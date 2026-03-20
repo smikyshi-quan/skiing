@@ -10,6 +10,7 @@ Run:
     python MVP/worker.py            # continuous loop
     python MVP/worker.py --once     # process one job then exit
     python MVP/worker.py --interval 5   # poll every 5 s
+    python MVP/worker.py --recover  # recover stale running jobs then exit
 """
 
 from __future__ import annotations
@@ -24,10 +25,11 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from dotenv import load_dotenv
 
-# ── Path setup ────────────────────────────────────────────────────────────────
+# Path setup
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKER_DIR = Path(__file__).resolve().parent  # MVP/
@@ -36,16 +38,21 @@ RUN_SCRIPT = WORKER_DIR / "run.py"
 # Load secrets from MVP/.env.worker (not committed to repo)
 load_dotenv(WORKER_DIR / ".env.worker")
 
-import os  # noqa: E402  (after dotenv)
+import os  # noqa: E402
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+POLL_INTERVAL_S = float(os.environ.get("WORKER_POLL_INTERVAL", "10"))
+
+# How long (seconds) a job can stay in 'running' without a heartbeat before it
+# is considered stale and re-queued.
+STALE_THRESHOLD_S = int(os.environ.get("WORKER_STALE_THRESHOLD", "600"))
 
 from supabase import create_client  # noqa: E402
 
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-# ── Graceful shutdown ─────────────────────────────────────────────────────────
+# Graceful shutdown
 
 _running = True
 
@@ -59,7 +66,7 @@ def _handle_sigterm(signum, frame):  # noqa: ANN001
 signal.signal(signal.SIGINT, _handle_sigterm)
 signal.signal(signal.SIGTERM, _handle_sigterm)
 
-# ── Job processing ────────────────────────────────────────────────────────────
+# Helpers
 
 
 def _now_iso() -> str:
@@ -70,6 +77,78 @@ def _set_status(job_id: str, status: str, **extra) -> None:
     supabase.table("jobs").update(
         {"status": status, "updated_at": _now_iso(), **extra}
     ).eq("id", job_id).execute()
+
+
+def _set_progress(job_id: str, config: dict, note: str) -> None:
+    """Write a progress note and heartbeat timestamp into jobs.config."""
+    config["progress_note"] = note
+    config["heartbeat_at"] = _now_iso()
+    supabase.table("jobs").update(
+        {"config": config, "updated_at": _now_iso()}
+    ).eq("id", job_id).execute()
+
+
+def _write_heartbeat(job_id: str, config: dict) -> None:
+    """Update heartbeat_at without changing the progress note."""
+    config["heartbeat_at"] = _now_iso()
+    supabase.table("jobs").update(
+        {"config": config, "updated_at": _now_iso()}
+    ).eq("id", job_id).execute()
+
+
+# Stale job recovery
+
+
+def recover_stale_jobs() -> int:
+    """Requeue running jobs whose heartbeat (or updated_at) is older than STALE_THRESHOLD_S."""
+    result = (
+        supabase.table("jobs")
+        .select("id, config, updated_at")
+        .eq("status", "running")
+        .execute()
+    )
+    if not result.data:
+        return 0
+
+    now = datetime.now(timezone.utc)
+    recovered = 0
+
+    for job in result.data:
+        config = job.get("config") or {}
+        heartbeat_str = config.get("heartbeat_at")
+
+        ref_time = None
+        if heartbeat_str:
+            try:
+                ref_time = datetime.fromisoformat(heartbeat_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
+        if ref_time is None:
+            try:
+                ref_time = datetime.fromisoformat(job["updated_at"].replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+
+        age_s = (now - ref_time).total_seconds()
+        if age_s > STALE_THRESHOLD_S:
+            config.pop("heartbeat_at", None)
+            config["progress_note"] = "Recovered from stale running state — requeued"
+            supabase.table("jobs").update(
+                {
+                    "status": "queued",
+                    "config": config,
+                    "error": None,
+                    "updated_at": _now_iso(),
+                }
+            ).eq("id", job["id"]).execute()
+            print(f"  [recovery] Requeued stale job {job['id']} (idle {age_s:.0f}s)")
+            recovered += 1
+
+    return recovered
+
+
+# Job claiming
 
 
 def _claim_job() -> dict | None:
@@ -87,21 +166,27 @@ def _claim_job() -> dict | None:
 
     job = result.data[0]
 
-    # Guard against a second worker claiming the same row
     update = (
         supabase.table("jobs")
         .update({"status": "running", "updated_at": _now_iso()})
         .eq("id", job["id"])
-        .eq("status", "queued")  # only succeeds if still queued
+        .eq("status", "queued")
         .execute()
     )
     return update.data[0] if update.data else None
 
 
-def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict, dict | None]:
-    """Invoke MVP/run.py and return (run_dir, mvp_summary_dict, analysis_summary_dict_or_None)."""
+# Analysis
+
+
+def _run_analysis(
+    local_video: Path,
+    job_config: dict,
+    heartbeat: Callable[[], None] | None = None,
+) -> tuple[Path, dict, dict | None]:
+    """Invoke MVP/run.py and return (run_dir, mvp_summary_dict, full_analysis_summary_or_None)."""
     pose_engine = job_config.get("pose_engine", "mediapipe")
-    max_fps = job_config.get("max_fps", 12)
+    max_fps = job_config.get("max_fps", None)
     max_dimension = job_config.get("max_dimension", None)
     render_overlay = bool(job_config.get("render_overlay", True))
     render_max_dimension = job_config.get("render_max_dimension", None)
@@ -111,17 +196,47 @@ def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict, dict
         str(RUN_SCRIPT),
         str(local_video),
         "--pose-engine", str(pose_engine),
-        "--max-fps", str(max_fps),
     ]
+    if max_fps is not None:
+        cmd.extend(["--max-fps", str(max_fps)])
     if max_dimension is not None:
         cmd.extend(["--max-dimension", str(max_dimension)])
     if render_max_dimension is not None:
         cmd.extend(["--render-max-dimension", str(render_max_dimension)])
     if not render_overlay:
         cmd.append("--no-overlay")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
 
-    # Always print analysis output so warnings (e.g. overlay rendering failures) are visible
+    heartbeat_deadline = time.monotonic() + 60.0
+
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stdout_file, tempfile.TemporaryFile(
+        mode="w+t", encoding="utf-8"
+    ) as stderr_file:
+        process = subprocess.Popen(
+            cmd,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            text=True,
+        )
+
+        while process.poll() is None:
+            if heartbeat and time.monotonic() >= heartbeat_deadline:
+                heartbeat()
+                heartbeat_deadline = time.monotonic() + 60.0
+            time.sleep(1.0)
+
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout = stdout_file.read()
+        stderr = stderr_file.read()
+
+    class _Completed:
+        def __init__(self, returncode: int, stdout: str, stderr: str) -> None:
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    result = _Completed(process.returncode, stdout, stderr)
+
     if result.stdout.strip():
         for line in result.stdout.strip().splitlines():
             print(f"  [run.py] {line}")
@@ -133,7 +248,6 @@ def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict, dict
         stderr_tail = result.stderr[-2000:] if result.stderr else "(no stderr)"
         raise RuntimeError(f"run.py exited {result.returncode}:\n{stderr_tail}")
 
-    # Parse run directory from stdout line: "Run directory : /path/to/dir"
     run_dir: Path | None = None
     for line in result.stdout.splitlines():
         if "Run directory :" in line:
@@ -151,14 +265,17 @@ def _run_analysis(local_video: Path, job_config: dict) -> tuple[Path, dict, dict
 
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
-    analysis_summary_path = run_dir / "summary" / "summary.json"
-    analysis_summary = None
-    if analysis_summary_path.exists():
-        analysis_summary = json.loads(analysis_summary_path.read_text(encoding="utf-8"))
+    full_summary_path = run_dir / "summary" / "summary.json"
+    full_summary = None
+    if full_summary_path.exists():
+        full_summary = json.loads(full_summary_path.read_text(encoding="utf-8"))
     else:
-        print(f"  [warn] analysis summary not found at {analysis_summary_path}", file=sys.stderr)
+        print(f"  [warn] full pipeline summary not found at {full_summary_path}", file=sys.stderr)
 
-    return run_dir, summary, analysis_summary
+    return run_dir, summary, full_summary
+
+
+# Uploads
 
 
 def _upload_bytes(
@@ -174,13 +291,10 @@ def _upload_bytes(
             file=content,
             file_options={"content-type": content_type, "upsert": "true"},
         )
-        # storage3 may return error info without raising in some versions
         if hasattr(res, "error") and res.error:
             raise RuntimeError(f"Storage error: {res.error}")
     except Exception as exc:
-        raise RuntimeError(
-            f"Upload to {bucket}/{remote_path} failed: {exc}"
-        ) from exc
+        raise RuntimeError(f"Upload to {bucket}/{remote_path} failed: {exc}") from exc
 
 
 def _upload_file(
@@ -192,14 +306,14 @@ def _upload_file(
 ) -> None:
     guessed, _ = mimetypes.guess_type(str(local_path))
     size_mb = local_path.stat().st_size / 1_048_576
-    print(f"  → {local_path.name} ({size_mb:.1f} MB) → {bucket}/{remote_path}")
+    print(f"  -> {local_path.name} ({size_mb:.1f} MB) -> {bucket}/{remote_path}")
     _upload_bytes(
         bucket=bucket,
         remote_path=remote_path,
         content=local_path.read_bytes(),
         content_type=content_type or guessed or "application/octet-stream",
     )
-    print(f"  ✓ {local_path.name} uploaded")
+    print(f"  OK {local_path.name} uploaded")
 
 
 def _extract_cool_moment_photos(
@@ -209,7 +323,7 @@ def _extract_cool_moment_photos(
     output_dir: Path,
     limit: int = 24,
 ) -> list[tuple[Path, dict]]:
-    """Extract one 'cool-moment' frame per turn (midpoint) and return [(path, meta)]."""
+    """Extract one cool-moment frame per turn and return [(path, meta)]."""
     try:
         import cv2  # type: ignore
     except Exception:
@@ -274,37 +388,38 @@ def _upload_artifacts(
     *,
     job_id: str,
     run_dir: Path,
-    summary: dict,
-    analysis_summary: dict | None,
+    full_summary: dict | None,
     local_video: Path,
 ) -> list[dict]:
-    """Upload overlay video + cool-moment photos + summary to Supabase Storage and return DB rows."""
+    """Upload artifacts to Supabase Storage and return DB rows."""
     rows: list[dict] = []
 
-    # summary JSON
-    summary_local = run_dir / "mvp_summary.json"
-    summary_remote = f"jobs/{job_id}/summary.json"
-    _upload_file(
-        bucket="artifacts",
-        remote_path=summary_remote,
-        local_path=summary_local,
-        content_type="application/json",
-    )
-    rows.append(
-        {
-            "job_id": job_id,
-            "kind": "summary_json",
-            "object_path": summary_remote,
-            "meta": {},
-        }
-    )
+    full_summary_local = run_dir / "summary" / "summary.json"
+    if full_summary_local.exists():
+        summary_remote = f"jobs/{job_id}/summary.json"
+        _upload_file(
+            bucket="artifacts",
+            remote_path=summary_remote,
+            local_path=full_summary_local,
+            content_type="application/json",
+        )
+        rows.append(
+            {
+                "job_id": job_id,
+                "kind": "summary_json",
+                "object_path": summary_remote,
+                "meta": {},
+            }
+        )
+    else:
+        print(f"  [warn] full summary not found at {full_summary_local}", file=sys.stderr)
 
-    # overlay video (if present)
     overlay_local: Path | None = None
-    for artifact in summary.get("artifacts", []):
-        if artifact.get("kind") == "video_overlay" and artifact.get("path"):
-            overlay_local = Path(str(artifact["path"]))
-            break
+    if full_summary:
+        for artifact in full_summary.get("artifacts", []):
+            if artifact.get("kind") == "video_overlay" and artifact.get("path"):
+                overlay_local = Path(str(artifact["path"]))
+                break
     if overlay_local is None:
         candidate = run_dir / "videos" / "overlay.mp4"
         if candidate.exists():
@@ -327,12 +442,10 @@ def _upload_artifacts(
             }
         )
     else:
-        expected = overlay_local or (run_dir / "videos" / "overlay.mp4")
-        print(f"  [warn] overlay video not found at {expected} — skipping", file=sys.stderr)
+        print("  [warn] overlay video not found — skipping", file=sys.stderr)
 
-    # metrics CSV (if present)
-    if analysis_summary:
-        for artifact in analysis_summary.get("artifacts", []) or []:
+    if full_summary:
+        for artifact in full_summary.get("artifacts", []) or []:
             if artifact.get("kind") != "metrics_csv" or not artifact.get("path"):
                 continue
             metrics_local = Path(str(artifact["path"]))
@@ -355,8 +468,7 @@ def _upload_artifacts(
             )
             break
 
-    # cool-moment photos (midpoint per turn)
-    turns = (analysis_summary or {}).get("turns") if analysis_summary else None
+    turns = (full_summary or {}).get("turns") if full_summary else None
     if isinstance(turns, list) and turns:
         print(f"  extracting cool-moment frames for {len(turns)} turn(s)...")
         source_video = overlay_local if overlay_local and overlay_local.exists() else local_video
@@ -382,54 +494,19 @@ def _upload_artifacts(
                     "meta": meta or {},
                 }
             )
-    elif analysis_summary is not None:
+    elif full_summary is not None:
         print("  [warn] no turns in analysis summary — no cool-moment photos", file=sys.stderr)
 
-    # any legacy peak-pressure frames if present
-    for artifact in summary.get("artifacts", []):
-        kind = artifact.get("kind", "")
-        if kind not in ("peak_pressure_frame", "peak_pressure_frame_enhanced"):
-            continue
-
-        local_path = Path(str(artifact.get("path") or ""))
-        if not local_path.exists():
-            print(f"  [warn] Frame not found locally, skipping: {local_path}")
-            continue
-
-        remote_path = f"jobs/{job_id}/frames/{local_path.name}"
-        _upload_file(
-            bucket="artifacts",
-            remote_path=remote_path,
-            local_path=local_path,
-            content_type="image/jpeg",
-        )
-        rows.append(
-            {
-                "job_id": job_id,
-                "kind": kind,
-                "object_path": remote_path,
-                "meta": {
-                    "turn_idx": artifact.get("turn_idx"),
-                    "side": artifact.get("side"),
-                    "timestamp_s": artifact.get("timestamp_s"),
-                },
-            }
-        )
-
     return rows
+
+
+# Job processing
 
 
 def process_job(job: dict) -> None:
     job_id: str = job["id"]
     video_path_in_storage: str | None = job.get("video_object_path")
     config: dict = dict(job.get("config") or {})
-
-    def _set_progress(note: str) -> None:
-        """Write a progress note into jobs.config so the UI can show it."""
-        config["progress_note"] = note
-        supabase.table("jobs").update(
-            {"config": config, "updated_at": _now_iso()}
-        ).eq("id", job_id).execute()
 
     print(f"[{job_id[:8]}] Starting job (video: {video_path_in_storage})")
 
@@ -439,46 +516,44 @@ def process_job(job: dict) -> None:
 
     with tempfile.TemporaryDirectory(prefix="skicoach_") as tmpdir:
         try:
-            # 1. Download video
-            _set_progress("Downloading video...")
+            _set_progress(job_id, config, "Downloading video...")
             print(f"[{job_id[:8]}] Downloading video from Storage...")
-            video_bytes: bytes = supabase.storage.from_("videos").download(
-                video_path_in_storage
-            )
+            video_bytes: bytes = supabase.storage.from_("videos").download(video_path_in_storage)
             suffix = Path(video_path_in_storage).suffix or ".mp4"
             local_video = Path(tmpdir) / f"video{suffix}"
             local_video.write_bytes(video_bytes)
             size_mb = len(video_bytes) / 1_048_576
             print(f"[{job_id[:8]}] Downloaded {size_mb:.1f} MB")
 
-            # 2. Run technique analysis
-            _set_progress("Running pose analysis...")
+            _set_progress(job_id, config, "Running pose analysis...")
             print(f"[{job_id[:8]}] Running technique analysis...")
-            run_dir, summary, analysis_summary = _run_analysis(local_video, config)
-            n_turns = summary.get("turns", 0)
+            run_dir, mvp_summary, full_summary = _run_analysis(
+                local_video,
+                config,
+                heartbeat=lambda: _write_heartbeat(job_id, config),
+            )
+            n_turns = mvp_summary.get("turns", 0)
             print(f"[{job_id[:8]}] Analysis done — {n_turns} turn(s) detected")
 
-            # Warn if quality flags were set
-            warnings = summary.get("quality", {}).get("warnings", [])
-            for w in warnings:
-                print(f"  [quality warn] {w}", file=sys.stderr)
+            for warning in (mvp_summary.get("quality") or {}).get("warnings", []):
+                print(f"  [quality warn] {warning}", file=sys.stderr)
 
-            # 3. Upload results
-            _set_progress(f"Uploading results ({n_turns} turn(s) found)...")
+            _write_heartbeat(job_id, config)
+
+            _set_progress(job_id, config, f"Uploading results ({n_turns} turn(s) found)...")
             print(f"[{job_id[:8]}] Uploading artifacts...")
             rows = _upload_artifacts(
                 job_id=job_id,
                 run_dir=run_dir,
-                summary=summary,
-                analysis_summary=analysis_summary,
+                full_summary=full_summary,
                 local_video=local_video,
             )
             if rows:
                 supabase.table("artifacts").insert(rows).execute()
             print(f"[{job_id[:8]}] Uploaded {len(rows)} artifact(s)")
 
-            # 4. Mark done
             config.pop("progress_note", None)
+            config.pop("heartbeat_at", None)
             _set_status(
                 job_id,
                 "done",
@@ -493,25 +568,36 @@ def process_job(job: dict) -> None:
             _set_status(job_id, "error", error=msg)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# Entry point
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description="SkiCoach local worker.")
+    p.add_argument("--once", action="store_true", help="Process one job then exit.")
     p.add_argument(
-        "--once", action="store_true", help="Process one job then exit."
+        "--recover",
+        action="store_true",
+        help="Recover stale running jobs then exit.",
     )
     p.add_argument(
         "--interval",
         type=float,
-        default=10.0,
+        default=POLL_INTERVAL_S,
         metavar="SECS",
-        help="Seconds between polls when idle (default 10).",
+        help="Seconds between polls when idle.",
     )
     args = p.parse_args()
 
     print(f"[worker] Starting — polling {SUPABASE_URL}")
     print(f"[worker] Using {RUN_SCRIPT}")
+
+    n = recover_stale_jobs()
+    if n:
+        print(f"[worker] Recovered {n} stale job(s)")
+
+    if args.recover:
+        return 0
+
     print("[worker] Press Ctrl-C to stop.\n")
 
     while _running:

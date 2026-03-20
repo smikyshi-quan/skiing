@@ -80,10 +80,10 @@ export default async function HomePage() {
   const { createServiceClient } = await import('@/lib/supabase/server')
   const service = createServiceClient()
 
-  const { data: jobs } = await service
+  // Use session client for user-facing job reads — RLS scopes by user_id
+  const { data: jobs } = await supabase
     .from('jobs')
     .select('*')
-    .eq('user_id', user.id)
     .order('created_at', { ascending: false })
 
   const runs = (jobs ?? []) as Job[]
@@ -103,12 +103,17 @@ export default async function HomePage() {
   let level: string | null = latestScore != null ? scoreLabel(latestScore) : null
   let primaryTip: CoachingTip | null = null
 
-  // Fetch summaries from last 3 completed runs for coaching patterns
+  // Fetch summaries from last 3 completed runs in parallel for coaching patterns
   const recentCompleted = completedRuns.slice(0, 3)
   const recentTipSets: CoachingTip[][] = []
 
-  for (const run of recentCompleted) {
-    const summary = await fetchSummary(service, run)
+  const summaries = await Promise.all(
+    recentCompleted.map((run) => fetchSummary(service, run))
+  )
+
+  for (let i = 0; i < recentCompleted.length; i++) {
+    const run = recentCompleted[i]
+    const summary = summaries[i]
     if (!summary) continue
 
     // Collect coaching tips for practice guidance

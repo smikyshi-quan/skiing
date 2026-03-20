@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { LogoutButton } from '@/components/logout-button'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <nav className="topnav">
               <Link href="/upload" className="topnav-link">Analyse</Link>
               <Link href="/jobs" className="topnav-link">Archive</Link>
+              <LogoutButton />
             </nav>
           </header>
 

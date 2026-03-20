@@ -33,6 +33,7 @@ export default async function ArchivePage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  // RLS policy on `jobs` scopes results to the authenticated user
   const { data: jobs } = await supabase
     .from('jobs')
     .select('*')

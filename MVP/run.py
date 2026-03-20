@@ -67,6 +67,8 @@ def main() -> int:
     )
     summary = TechniqueAnalysisRunner(config=config).run(video_path)
 
+    # Write a compact local summary for the worker to introspect without
+    # re-parsing the full pipeline output.
     mvp_summary = {
         "video": str(video_path),
         "run_directory": summary.run_directory,
