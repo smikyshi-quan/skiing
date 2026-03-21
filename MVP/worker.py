@@ -79,10 +79,24 @@ def _set_status(job_id: str, status: str, **extra) -> None:
     ).eq("id", job_id).execute()
 
 
-def _set_progress(job_id: str, config: dict, note: str) -> None:
-    """Write a progress note and heartbeat timestamp into jobs.config."""
+def _set_progress(
+    job_id: str,
+    config: dict,
+    note: str,
+    *,
+    step: int | None = None,
+    total: int | None = None,
+    stage: str | None = None,
+) -> None:
+    """Write a progress note, structured step info, and heartbeat into jobs.config."""
     config["progress_note"] = note
     config["heartbeat_at"] = _now_iso()
+    if step is not None:
+        config["progress_step"] = step
+    if total is not None:
+        config["progress_total"] = total
+    if stage is not None:
+        config["progress_stage"] = stage
     supabase.table("jobs").update(
         {"config": config, "updated_at": _now_iso()}
     ).eq("id", job_id).execute()
@@ -516,7 +530,7 @@ def process_job(job: dict) -> None:
 
     with tempfile.TemporaryDirectory(prefix="skicoach_") as tmpdir:
         try:
-            _set_progress(job_id, config, "Downloading video...")
+            _set_progress(job_id, config, "Downloading video...", step=1, total=4, stage="Downloading video")
             print(f"[{job_id[:8]}] Downloading video from Storage...")
             video_bytes: bytes = supabase.storage.from_("videos").download(video_path_in_storage)
             suffix = Path(video_path_in_storage).suffix or ".mp4"
@@ -525,7 +539,7 @@ def process_job(job: dict) -> None:
             size_mb = len(video_bytes) / 1_048_576
             print(f"[{job_id[:8]}] Downloaded {size_mb:.1f} MB")
 
-            _set_progress(job_id, config, "Running pose analysis...")
+            _set_progress(job_id, config, "Running pose analysis...", step=2, total=4, stage="Running pose analysis")
             print(f"[{job_id[:8]}] Running technique analysis...")
             run_dir, mvp_summary, full_summary = _run_analysis(
                 local_video,
@@ -540,7 +554,7 @@ def process_job(job: dict) -> None:
 
             _write_heartbeat(job_id, config)
 
-            _set_progress(job_id, config, f"Uploading results ({n_turns} turn(s) found)...")
+            _set_progress(job_id, config, f"Uploading results ({n_turns} turn(s) found)...", step=3, total=4, stage="Uploading recap artifacts")
             print(f"[{job_id[:8]}] Uploading artifacts...")
             rows = _upload_artifacts(
                 job_id=job_id,
@@ -552,8 +566,13 @@ def process_job(job: dict) -> None:
                 supabase.table("artifacts").insert(rows).execute()
             print(f"[{job_id[:8]}] Uploaded {len(rows)} artifact(s)")
 
+            _set_progress(job_id, config, "Finalizing recap...", step=4, total=4, stage="Finalizing recap")
+
             config.pop("progress_note", None)
             config.pop("heartbeat_at", None)
+            config.pop("progress_step", None)
+            config.pop("progress_total", None)
+            config.pop("progress_stage", None)
             _set_status(
                 job_id,
                 "done",

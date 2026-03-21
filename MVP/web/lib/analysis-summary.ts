@@ -17,15 +17,115 @@ export interface CoachingTip {
   explanation: string
   evidence: string
   severity: 'action' | 'warn' | 'info'
+  time_ranges?: [number, number][]
+}
+
+export interface TrackingSegment {
+  idx: number
+  start_s: number
+  end_s: number
+  n_confident_frames: number
+  mean_confidence: number
+  n_turns: number
+  is_primary: boolean
 }
 
 export interface TechniqueRunSummary {
   quality?: {
     overall_pose_confidence_mean?: number
+    low_confidence_fraction?: number
     warnings?: string[]
   }
   coaching_tips?: CoachingTip[]
   turns?: TechniqueTurn[]
+  segments?: TrackingSegment[]
+}
+
+// ── Recap reliability ───────────────────────────────────────
+export type RecapReliability = 'reliable' | 'limited' | 'insufficient'
+
+// Thresholds — gathered in one place for easy tuning
+const RELIABILITY_THRESHOLDS = {
+  insufficientConfidence: 0.55,
+  insufficientLowFraction: 0.35,
+  limitedConfidence: 0.70,
+  limitedLowFraction: 0.20,
+} as const
+
+export function computeReliability(summary: TechniqueRunSummary): RecapReliability {
+  const warnings = toArray<string>(summary.quality?.warnings)
+  const segments = toArray<TrackingSegment>(summary.segments)
+  const confidence = summary.quality?.overall_pose_confidence_mean ?? 1
+  const lowFrac = summary.quality?.low_confidence_fraction ?? 0
+
+  const hasSceneCut = warnings.some((w) => /scene.?cut/i.test(w))
+  const multiSegment = segments.length > 1
+
+  // Insufficient: multiple segments, scene cuts, very low confidence
+  if (
+    multiSegment ||
+    hasSceneCut ||
+    confidence < RELIABILITY_THRESHOLDS.insufficientConfidence ||
+    lowFrac > RELIABILITY_THRESHOLDS.insufficientLowFraction
+  ) {
+    return 'insufficient'
+  }
+
+  // Limited: any warning present, or moderately low confidence
+  if (
+    warnings.length > 0 ||
+    confidence < RELIABILITY_THRESHOLDS.limitedConfidence ||
+    lowFrac > RELIABILITY_THRESHOLDS.limitedLowFraction
+  ) {
+    return 'limited'
+  }
+
+  return 'reliable'
+}
+
+// ── Human-readable metric labels ────────────────────────────
+export function humanMetricLabel(fill: number): string {
+  if (fill >= 78) return 'Strong'
+  if (fill >= 55) return 'Moderate'
+  if (fill >= 30) return 'Needs work'
+  return 'Limited'
+}
+
+// ── Score meaning context ───────────────────────────────────
+export function scoreContext(score: number): string {
+  if (score >= 78) return 'Expert-level mechanics — clean, efficient movement throughout.'
+  if (score >= 62) return 'Solid fundamentals with room to refine specific areas.'
+  if (score >= 45) return 'Core patterns are forming — the focus areas below will accelerate progress.'
+  return 'Scores reflect technical execution; most recreational skiers land between 35–55. Focus on the top priorities below.'
+}
+
+// ── Category deduplication groups ───────────────────────────
+const CATEGORY_GROUPS: Record<string, string[]> = {
+  'Upper Body Control': ['upper_body_quietness', 'shoulder_tilt', 'torso', 'rotation', 'quiet', 'stabilise', 'upper body'],
+  'Lower Body Alignment': ['knee', 'hip_knee_ankle', 'flexion', 'alignment', 'knees forward'],
+  'Balance & Stance': ['stance', 'balance', 'lean', 'width', 'narrow', 'wide'],
+  'Edge Engagement': ['edge', 'carv', 'angle', 'inclination'],
+}
+
+function tipGroupKey(tip: CoachingTip): string {
+  const text = `${tip.title} ${tip.evidence}`.toLowerCase()
+  for (const [group, keywords] of Object.entries(CATEGORY_GROUPS)) {
+    if (keywords.some((kw) => text.includes(kw))) return group
+  }
+  return tip.title // unique fallback — no dedup
+}
+
+export function deduplicateTips(tips: CoachingTip[]): CoachingTip[] {
+  const seen = new Map<string, CoachingTip>()
+  const severityRank: Record<string, number> = { action: 0, warn: 1, info: 2 }
+  for (const tip of tips) {
+    const group = tipGroupKey(tip)
+    const existing = seen.get(group)
+    if (!existing || (severityRank[tip.severity] ?? 3) < (severityRank[existing.severity] ?? 3)) {
+      seen.set(group, tip)
+    }
+  }
+  return Array.from(seen.values())
 }
 
 export interface DashboardMetric {
@@ -54,8 +154,10 @@ export interface TechniqueDashboard {
     turnsDetected: number
     bestTurnScore: number
   }
+  reliability: RecapReliability
   categories: DashboardCategory[]
   focusCards: CoachingTip[]
+  allTips: CoachingTip[]
   turnHighlights: Array<{
     title: string
     score: number
@@ -259,7 +361,7 @@ export function buildTechniqueDashboard(summary: TechniqueRunSummary): Technique
       metrics: [
         {
           label: 'Upper-body quietness',
-          value: quietnessMean.toExponential(2),
+          value: humanMetricLabel(railPercent(smallerIsBetter(quietnessMean, 0.002, 0.02))),
           helper: 'Less head and torso sway keeps pressure where you need it.',
           leftLabel: 'Busy',
           rightLabel: 'Quiet',
@@ -277,7 +379,13 @@ export function buildTechniqueDashboard(summary: TechniqueRunSummary): Technique
     },
   ]
 
-  const focusCards = toArray<CoachingTip>(summary.coaching_tips).slice(0, 4)
+  const allRawTips = toArray<CoachingTip>(summary.coaching_tips)
+  const deduped = deduplicateTips(allRawTips)
+  const focusCards = deduped.slice(0, 2)
+  const allTips = deduped
+
+  const reliability = computeReliability(summary)
+
   const turnHighlights = [...turns]
     .sort((left, right) => right.quality_score - left.quality_score)
     .slice(0, 4)
@@ -296,8 +404,10 @@ export function buildTechniqueDashboard(summary: TechniqueRunSummary): Technique
       turnsDetected: turns.length,
       bestTurnScore,
     },
+    reliability,
     categories,
     focusCards,
+    allTips,
     turnHighlights,
     warnings: toArray<string>(summary.quality?.warnings),
   }

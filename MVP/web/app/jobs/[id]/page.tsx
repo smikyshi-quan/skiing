@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { buildTechniqueDashboard, scoreLabel, type CoachingTip, type TechniqueRunSummary } from '@/lib/analysis-summary'
+import { buildTechniqueDashboard, scoreLabel, scoreContext, computeReliability, type CoachingTip, type TechniqueRunSummary, type RecapReliability } from '@/lib/analysis-summary'
 import type { ArtifactWithUrl, Job, JobStatus } from '@/lib/types'
 
 interface JobResponse {
@@ -104,7 +104,10 @@ function levelBadgeClass(label: string) {
   }
 }
 
-function coachingHeadline(job: Job, summary: TechniqueRunSummary | null) {
+function coachingHeadline(job: Job, summary: TechniqueRunSummary | null, reliability: RecapReliability) {
+  if (reliability === 'insufficient' && summary?.coaching_tips?.length) {
+    return 'Analysis quality is limited for this clip. The suggestions below are directional — a cleaner recording will unlock a full score and detailed coaching.'
+  }
   if (summary?.coaching_tips?.length) {
     return summary.coaching_tips[0].explanation
   }
@@ -127,6 +130,7 @@ export default function JobDetailPage() {
   const [data, setData] = useState<JobResponse | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>('recap')
+  const [showAllTips, setShowAllTips] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -199,6 +203,7 @@ export default function JobDetailPage() {
   const { job, artifacts, summary, previousScore } = data
   const statusMeta = STATUS_META[job.status]
   const dashboard = summary ? buildTechniqueDashboard(summary) : null
+  const reliability: RecapReliability = dashboard?.reliability ?? (summary ? computeReliability(summary) : 'reliable')
   const isActive = ACTIVE.has(job.status)
   const progressNote = typeof job.config?.progress_note === 'string' ? job.config.progress_note : null
   const overlayArtifact = artifacts.find((artifact) => artifact.kind === 'video_overlay')
@@ -207,7 +212,7 @@ export default function JobDetailPage() {
     (artifact) => artifact.kind === 'peak_pressure_frame' || artifact.kind === 'peak_pressure_frame_enhanced',
   )
   const downloads = signedDownloads(artifacts)
-  const headline = coachingHeadline(job, summary)
+  const headline = coachingHeadline(job, summary, reliability)
 
   const score = job.score ?? dashboard?.overview.overallScore ?? null
   const level = score != null ? scoreLabel(score) : null
@@ -235,7 +240,7 @@ export default function JobDetailPage() {
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="space-y-3">
                   <div className="flex items-center gap-4 flex-wrap">
-                    {score != null && (
+                    {score != null && reliability !== 'insufficient' && (
                       <div className="score-ring" style={{ width: '11.25rem', height: '11.25rem' }}>
                         <div className="score-ring-glow" />
                         <svg width="180" height="180" viewBox="0 0 180 180">
@@ -263,15 +268,30 @@ export default function JobDetailPage() {
                           >
                             {score}
                           </span>
-                          <span className="text-xs mt-1" style={{ color: 'var(--ink-soft)' }}>technique</span>
+                          <span className="text-xs mt-1" style={{ color: 'var(--ink-soft)' }}>
+                            {reliability === 'limited' ? 'tentative' : 'technique'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {reliability === 'insufficient' && (
+                      <div
+                        className="flex items-center justify-center rounded-full"
+                        style={{ width: '11.25rem', height: '11.25rem', background: 'rgba(0,0,0,0.04)', border: '2px dashed rgba(0,0,0,0.12)' }}
+                      >
+                        <div className="text-center px-4">
+                          <p className="text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>Limited review</p>
+                          <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>Score hidden</p>
                         </div>
                       </div>
                     )}
                     <div className="space-y-2">
-                      {level && (
-                        <span className={levelBadgeClass(level)}>{level}</span>
+                      {level && reliability !== 'insufficient' && (
+                        <span className={levelBadgeClass(level)}>
+                          {reliability === 'limited' ? `${level} (tentative)` : level}
+                        </span>
                       )}
-                      {scoreDelta != null && (
+                      {scoreDelta != null && reliability !== 'insufficient' && (
                         <span
                           className="text-sm font-bold px-2.5 py-1 rounded-full block w-fit"
                           style={{
@@ -282,11 +302,18 @@ export default function JobDetailPage() {
                           {scoreDelta >= 0 ? '+' : ''}{scoreDelta} vs prev
                         </span>
                       )}
+                      {score != null && reliability !== 'insufficient' && (
+                        <p className="text-xs leading-snug max-w-[14rem]" style={{ color: 'var(--ink-soft)' }}>
+                          {scoreContext(score)}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <span className="eyebrow">Run recap</span>
                   <h1 style={{ fontSize: 'clamp(1.8rem, 3vw, 2.8rem)', fontWeight: 800, letterSpacing: '-0.04em', color: 'var(--ink-strong)' }}>
-                    {score != null ? headline.slice(0, 80) : 'Review how this run moved.'}
+                    {reliability === 'insufficient'
+                      ? 'Limited review — consider re-recording.'
+                      : score != null ? headline.slice(0, 80) : 'Review how this run moved.'}
                   </h1>
                 </div>
                 <span className="status-pill" style={{ color: statusMeta.color, background: statusMeta.background }}>
@@ -366,30 +393,37 @@ export default function JobDetailPage() {
                 </div>
               </div>
 
-              {isActive && (
-                <div className="surface-card-muted p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-bold" style={{ color: 'var(--ink-strong)' }}>Processing progress</p>
-                    <span style={{ color: 'var(--ink-soft)' }}>Auto refresh</span>
+              {isActive && (() => {
+                const step = typeof job.config?.progress_step === 'number' ? job.config.progress_step : null
+                const total = typeof job.config?.progress_total === 'number' ? job.config.progress_total : null
+                const stage = typeof job.config?.progress_stage === 'string' ? job.config.progress_stage : null
+                const pct = step != null && total
+                  ? Math.min(Math.round((step / total) * 100), 95)
+                  : job.status === 'created' ? 10
+                  : job.status === 'uploaded' ? 20
+                  : job.status === 'queued' ? 30
+                  : 55
+                const label = stage
+                  ? `Step ${step} of ${total}: ${stage}`
+                  : progressNote ?? statusMeta.helper
+                return (
+                  <div className="surface-card-muted p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-bold" style={{ color: 'var(--ink-strong)' }}>Processing progress</p>
+                      <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>Auto refresh</span>
+                    </div>
+                    <div className="mt-3 progress-track">
+                      <div
+                        className="progress-fill transition-all duration-700"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                      {label}
+                    </p>
                   </div>
-                  <div className="mt-3 progress-track">
-                    <div
-                      className="progress-fill transition-all duration-700"
-                      style={{
-                        width: `${
-                          job.status === 'created' ? 10
-                          : job.status === 'uploaded' ? 20
-                          : job.status === 'queued' ? 30
-                          : 55
-                        }%`,
-                      }}
-                    />
-                  </div>
-                  <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                    {progressNote ?? statusMeta.helper}
-                  </p>
-                </div>
-              )}
+                )
+              })()}
 
               {job.error && (
                 <div
@@ -422,121 +456,191 @@ export default function JobDetailPage() {
         </section>
 
         {activeTab === 'recap' && (
-          <div className="grid gap-6 lg:grid-cols-[1.02fr_0.98fr]">
-            <section className="surface-card p-6">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="space-y-6">
+            {/* ── Reliability banner ──────────────────────── */}
+            {reliability === 'insufficient' && (
+              <div
+                className="surface-card p-5 flex items-start gap-3"
+                style={{ background: 'var(--gold-dim)', border: '1px solid rgba(199,154,68,0.25)' }}
+              >
+                <span style={{ fontSize: '1.25rem' }}>&#9888;</span>
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Run recap</p>
-                  <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
-                    What stands out first
-                  </h2>
-                </div>
-                {dashboard?.overview.smoothnessScore != null && (
-                  <span className="status-pill" style={{ color: 'var(--success)', background: 'var(--success-dim)' }}>
-                    Smoothness {dashboard.overview.smoothnessScore}
-                  </span>
-                )}
-              </div>
-
-              <p className="mt-4 text-base leading-7" style={{ color: 'var(--ink-base)' }}>
-                {headline}
-              </p>
-
-              {dashboard ? (
-                <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                  <div className="metric-tile">
-                    <p className="metric-value">{dashboard.overview.bestTurnScore}</p>
-                    <p className="metric-label">Best single-turn quality score</p>
-                  </div>
-                  <div className="metric-tile">
-                    <p className="metric-value">{dashboard.overview.turnsDetected}</p>
-                    <p className="metric-label">Turns included in the coaching pass</p>
-                  </div>
-                  <div className="metric-tile">
-                    <p className="metric-value">{downloads.length}</p>
-                    <p className="metric-label">Artifacts ready to inspect or export</p>
-                  </div>
-                  <div className="metric-tile">
-                    <p className="metric-value">{coolMomentPhotos.length + peakFrames.length}</p>
-                    <p className="metric-label">Key images surfaced from the run</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-6 surface-card-muted p-4 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                  Summary metrics will appear here once the summary artifact is available.
-                </div>
-              )}
-
-              {!!dashboard?.warnings.length && (
-                <div className="mt-6 surface-card-muted p-4">
-                  <p className="text-xs uppercase tracking-[0.22em] font-bold" style={{ color: 'var(--ink-muted)' }}>
-                    Capture warnings
+                  <p className="text-sm font-bold" style={{ color: 'var(--ink-strong)' }}>
+                    Limited analysis quality
                   </p>
-                  <ul className="mt-3 space-y-2 text-sm" style={{ color: 'var(--ink-base)' }}>
-                    {dashboard.warnings.map((warning) => (
-                      <li key={warning}>{warning}</li>
-                    ))}
-                  </ul>
+                  <p className="mt-1 text-sm leading-6" style={{ color: 'var(--ink-base)' }}>
+                    This clip contains multiple tracking segments, scene cuts, or very low pose confidence.
+                    Treat the suggestions below as tentative. For a reliable score, try trimming to a single
+                    uninterrupted run and re-uploading.
+                  </p>
                 </div>
-              )}
-            </section>
-
-            <section className="surface-card p-6">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Next focus</p>
-                  <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
-                    Practice cards
-                  </h2>
-                </div>
-                <span className="status-pill" style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}>
-                  Coaching tips
-                </span>
               </div>
+            )}
+            {reliability === 'limited' && (
+              <div
+                className="surface-card p-4 flex items-start gap-3"
+                style={{ background: 'rgba(0,132,212,0.06)', border: '1px solid rgba(0,132,212,0.15)' }}
+              >
+                <span style={{ fontSize: '1rem' }}>&#8505;</span>
+                <p className="text-sm leading-6" style={{ color: 'var(--ink-base)' }}>
+                  Some capture warnings were detected. The score is marked <strong>tentative</strong> — treat
+                  these coaching suggestions as directional rather than definitive.
+                </p>
+              </div>
+            )}
 
-              <div className="mt-5 space-y-3">
-                {(dashboard?.focusCards.length ? dashboard.focusCards : summary?.coaching_tips ?? []).slice(0, 4).map((tip) => {
-                  const category = tipCategory(tip)
-                  const catColors = CATEGORY_COLORS[category] ?? CATEGORY_COLORS.general
-                  const CATEGORY_LABELS: Record<string, string> = {
-                    movement: 'Movement', edging: 'Edging', rhythm: 'Rhythm', balance: 'Balance', general: 'General',
-                  }
-                  return (
-                    <div key={`${tip.title}-${tip.evidence}`} className={`coaching-card ${catColors.accent}`}>
-                      <div className="flex items-center justify-between gap-3 pl-3">
-                        <p className="text-sm font-bold" style={{ color: 'var(--ink-strong)' }}>{tip.title}</p>
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${catColors.badge}`}>
-                          {CATEGORY_LABELS[category]}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm leading-6 pl-3" style={{ color: 'var(--ink-base)' }}>
-                        {tip.explanation}
-                      </p>
-                      <p className="mt-2 text-xs pl-3" style={{ color: 'var(--ink-muted)' }}>
-                        {tip.evidence}
-                      </p>
-                      <Link
-                        href="#"
-                        className="mt-2 inline-flex items-center gap-1 text-xs font-semibold pl-3"
-                        style={{ color: 'var(--ink-soft)' }}
-                        onClick={(e) => { e.preventDefault(); setActiveTab('moments') }}
-                      >
-                        Watch
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M5 12h14M12 5l7 7-7 7" />
-                        </svg>
-                      </Link>
+            <div className="grid gap-6 lg:grid-cols-[1.02fr_0.98fr]">
+              <section className="surface-card p-6">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Run recap</p>
+                    <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                      What stands out first
+                    </h2>
+                  </div>
+                  {dashboard?.overview.smoothnessScore != null && (
+                    <span className="status-pill" style={{ color: 'var(--success)', background: 'var(--success-dim)' }}>
+                      Smoothness {dashboard.overview.smoothnessScore}
+                    </span>
+                  )}
+                </div>
+
+                <p className="mt-4 text-base leading-7" style={{ color: 'var(--ink-base)' }}>
+                  {headline}
+                </p>
+
+                {dashboard ? (
+                  <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                    <div className="metric-tile">
+                      <p className="metric-value">{dashboard.overview.bestTurnScore}</p>
+                      <p className="metric-label">Best single-turn quality score</p>
                     </div>
-                  )
-                })}
-
-                {!summary?.coaching_tips?.length && (
-                  <div className="surface-card-muted p-4 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                    Tip cards appear when the summary JSON includes coaching guidance.
+                    <div className="metric-tile">
+                      <p className="metric-value">{dashboard.overview.turnsDetected}</p>
+                      <p className="metric-label">Turns included in the coaching pass</p>
+                    </div>
+                    <div className="metric-tile">
+                      <p className="metric-value">{downloads.length}</p>
+                      <p className="metric-label">Artifacts ready to inspect or export</p>
+                    </div>
+                    <div className="metric-tile">
+                      <p className="metric-value">{coolMomentPhotos.length + peakFrames.length}</p>
+                      <p className="metric-label">Key images surfaced from the run</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-6 surface-card-muted p-4 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                    Summary metrics will appear here once the summary artifact is available.
                   </div>
                 )}
-              </div>
-            </section>
+
+                {!!dashboard?.warnings.length && (
+                  <div className="mt-6 surface-card-muted p-4">
+                    <p className="text-xs uppercase tracking-[0.22em] font-bold" style={{ color: 'var(--ink-muted)' }}>
+                      Capture warnings
+                    </p>
+                    <ul className="mt-3 space-y-2 text-sm" style={{ color: 'var(--ink-base)' }}>
+                      {dashboard.warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </section>
+
+              <section className="surface-card p-6">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Next focus</p>
+                    <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                      {reliability === 'insufficient' ? 'Directional suggestions' : 'Top 2 priorities'}
+                    </h2>
+                  </div>
+                  <span className="status-pill" style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}>
+                    Coaching tips
+                  </span>
+                </div>
+
+                <div className="mt-5 space-y-3">
+                  {(() => {
+                    const allTips = dashboard?.allTips ?? dashboard?.focusCards ?? summary?.coaching_tips ?? []
+                    const visibleTips = showAllTips ? allTips : allTips.slice(0, 2)
+                    const CATEGORY_LABELS: Record<string, string> = {
+                      movement: 'Movement', edging: 'Edging', rhythm: 'Rhythm', balance: 'Balance', general: 'General',
+                    }
+                    return (
+                      <>
+                        {visibleTips.map((tip) => {
+                          const category = tipCategory(tip)
+                          const catColors = CATEGORY_COLORS[category] ?? CATEGORY_COLORS.general
+                          const timeLabel = tip.time_ranges?.length
+                            ? `Most visible around ${tip.time_ranges.map(([s]) => `${s.toFixed(1)}s`).join(' and ')}`
+                            : null
+                          return (
+                            <div key={`${tip.title}-${tip.evidence}`} className={`coaching-card ${catColors.accent}`}>
+                              <div className="flex items-center justify-between gap-3 pl-3">
+                                <p className="text-sm font-bold" style={{ color: 'var(--ink-strong)' }}>{tip.title}</p>
+                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${catColors.badge}`}>
+                                  {CATEGORY_LABELS[category]}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-sm leading-6 pl-3" style={{ color: 'var(--ink-base)' }}>
+                                {tip.explanation}
+                              </p>
+                              <p className="mt-2 text-xs pl-3" style={{ color: 'var(--ink-muted)' }}>
+                                {tip.evidence}
+                              </p>
+                              {timeLabel && (
+                                <p className="mt-1 text-xs font-medium pl-3" style={{ color: 'var(--accent)' }}>
+                                  {timeLabel}
+                                </p>
+                              )}
+                              <Link
+                                href="#"
+                                className="mt-2 inline-flex items-center gap-1 text-xs font-semibold pl-3"
+                                style={{ color: 'var(--ink-soft)' }}
+                                onClick={(e) => { e.preventDefault(); setActiveTab('moments') }}
+                              >
+                                View evidence
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M5 12h14M12 5l7 7-7 7" />
+                                </svg>
+                              </Link>
+                            </div>
+                          )
+                        })}
+                        {allTips.length > 2 && !showAllTips && (
+                          <button
+                            type="button"
+                            onClick={() => setShowAllTips(true)}
+                            className="text-sm font-semibold px-3 py-2 rounded-xl transition-colors"
+                            style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}
+                          >
+                            Show all {allTips.length} areas
+                          </button>
+                        )}
+                        {showAllTips && allTips.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => setShowAllTips(false)}
+                            className="text-sm font-semibold px-3 py-2 rounded-xl transition-colors"
+                            style={{ color: 'var(--ink-soft)', background: 'rgba(0,0,0,0.04)' }}
+                          >
+                            Show top 2 only
+                          </button>
+                        )}
+                      </>
+                    )
+                  })()}
+
+                  {!summary?.coaching_tips?.length && (
+                    <div className="surface-card-muted p-4 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                      Tip cards appear when the summary JSON includes coaching guidance.
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
           </div>
         )}
 
