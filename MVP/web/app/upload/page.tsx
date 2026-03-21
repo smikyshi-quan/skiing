@@ -138,7 +138,15 @@ export default function UploadPage() {
             One upload creates a job, queues the worker, and opens a run-detail page with overlay video, key moments, and recap-ready artifacts.
           </p>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/alpine/hero-powder.jpg"
+            alt="Fresh powder tracks"
+            className="hero-photo mt-6"
+            style={{ height: '200px' }}
+          />
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-3">
             <div className="metric-tile">
               <p className="metric-value">1</p>
               <p className="metric-label">Continuous clip for the cleanest recap.</p>
@@ -153,7 +161,7 @@ export default function UploadPage() {
             </div>
           </div>
 
-          <div className="mt-8 grid gap-3">
+          <div className="mt-6 grid gap-3">
             {flow.map((stepLabel, index) => (
               <div
                 key={stepLabel}

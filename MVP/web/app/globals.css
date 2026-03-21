@@ -107,6 +107,10 @@
     background-image: url('/alpine/archive-bg.jpg');
   }
 
+  .route-bg--detail {
+    background-image: url('/alpine/detail-bg.jpg');
+  }
+
   /* Overlay tinting per route */
   .route-bg::after {
     content: '';
@@ -116,19 +120,32 @@
   }
 
   .route-bg--upload::after {
-    background: linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.15) 100%);
+    background: linear-gradient(180deg, rgba(0,20,50,0.15) 0%, rgba(0,20,50,0.35) 100%);
   }
 
   .route-bg--login::after {
-    background: linear-gradient(180deg, rgba(40,20,0,0.10) 0%, rgba(40,20,0,0.30) 100%);
+    background: linear-gradient(180deg, rgba(40,20,0,0.12) 0%, rgba(40,20,0,0.35) 100%);
   }
 
   .route-bg--dashboard::after {
-    background: linear-gradient(180deg, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.25) 100%);
+    background: linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.30) 100%);
   }
 
   .route-bg--archive::after {
-    background: linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.20) 100%);
+    background: linear-gradient(180deg, rgba(0,20,10,0.10) 0%, rgba(0,20,10,0.25) 100%);
+  }
+
+  .route-bg--detail::after {
+    background: linear-gradient(180deg, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.30) 100%);
+  }
+
+  /* ── Inline hero image ──────────────────────────── */
+  .hero-photo {
+    width: 100%;
+    border-radius: var(--radius-xl);
+    object-fit: cover;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   }
 
   /* ── Shell / layout ───────────────────────────────── */

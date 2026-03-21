@@ -366,6 +366,13 @@ export default async function HomePage() {
 
         {/* ── Archive preview ──────────────────────────── */}
         <section className="surface-card p-6">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/alpine/hero-powder.jpg"
+            alt="Fresh powder tracks on the mountain"
+            className="hero-photo mb-5"
+            style={{ height: '140px' }}
+          />
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Recent runs</p>

@@ -168,7 +168,7 @@ export default function JobDetailPage() {
   if (fetchError && !data) {
     return (
       <>
-        <div className="route-bg route-bg--archive" />
+        <div className="route-bg route-bg--detail" />
         <div className="space-y-4">
           <div
             className="surface-card-strong p-6"
@@ -187,7 +187,7 @@ export default function JobDetailPage() {
   if (!data) {
     return (
       <>
-        <div className="route-bg route-bg--archive" />
+        <div className="route-bg route-bg--detail" />
         <div className="space-y-4 animate-pulse">
           <div className="h-6 w-36 rounded-full" style={{ background: 'rgba(0,0,0,0.08)' }} />
           <div className="surface-card h-[24rem]" />
@@ -220,7 +220,7 @@ export default function JobDetailPage() {
 
   return (
     <>
-      <div className="route-bg route-bg--archive" />
+      <div className="route-bg route-bg--detail" />
       <div className="space-y-6">
         <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
           <Link href="/jobs" className="hover:underline">Archive</Link>

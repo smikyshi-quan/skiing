@@ -53,6 +53,13 @@ export default async function ArchivePage() {
       <div className="route-bg route-bg--archive" />
       <div className="space-y-6">
         <section className="surface-card p-8 lg:p-10">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/alpine/hero-corduroy.jpg"
+            alt="Freshly groomed corduroy slope"
+            className="hero-photo mb-6"
+            style={{ height: '160px' }}
+          />
           <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
             <div>
               <span className="eyebrow">Run archive</span>

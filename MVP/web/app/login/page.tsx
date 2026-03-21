@@ -66,13 +66,21 @@ export default function LoginPage() {
             </p>
           </div>
 
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/alpine/hero-corduroy.jpg"
+            alt="Groomed corduroy slope"
+            className="hero-photo mt-6"
+            style={{ height: '180px' }}
+          />
+
           <div className="mt-6 flex flex-wrap gap-2">
             {previewTags.map((tag) => (
               <span key={tag} className="accent-chip">{tag}</span>
             ))}
           </div>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-3">
+          <div className="mt-6 grid gap-4 sm:grid-cols-3">
             <div className="metric-tile">
               <p className="metric-value">17+</p>
               <p className="metric-label">Technique markers surfaced across a run recap</p>
