@@ -88,7 +88,6 @@ export default async function HomePage() {
   const { createServiceClient } = await import('@/lib/supabase/server')
   const service = createServiceClient()
 
-  // Use session client for user-facing job reads — RLS scopes by user_id
   const { data: jobs } = await supabase
     .from('jobs')
     .select('*')
@@ -98,20 +97,16 @@ export default async function HomePage() {
   const completedRuns = runs.filter((j) => j.status === 'done')
   const latestCompleted = completedRuns[0] ?? null
 
-  // Build scored runs list from stored scores
   const scoredRuns = completedRuns.filter((j) => j.score != null) as (Job & { score: number })[]
   const latestScore = scoredRuns[0]?.score ?? null
   const previousScore = scoredRuns[1]?.score ?? null
   const scoreDelta = latestScore != null && previousScore != null ? latestScore - previousScore : null
   const bestRecentScore = scoredRuns.length ? Math.max(...scoredRuns.slice(0, 10).map((j) => j.score)) : null
-  const recentTrend = scoredRuns.slice(0, 5).map((j) => j.score)
 
-  // Fallback: if no stored score, try computing from summary
   let score = latestScore
   let level: string | null = latestScore != null ? scoreLabel(latestScore) : null
   let primaryTip: CoachingTip | null = null
 
-  // Fetch summaries from last 3 completed runs in parallel for coaching patterns
   const recentCompleted = completedRuns.slice(0, 3)
   const recentTipSets: CoachingTip[][] = []
 
@@ -124,11 +119,9 @@ export default async function HomePage() {
     const summary = summaries[i]
     if (!summary) continue
 
-    // Collect coaching tips for practice guidance
     const tips = summary.coaching_tips ?? []
     if (tips.length) recentTipSets.push(tips)
 
-    // Handle latest run specifically
     if (run.id === latestCompleted?.id) {
       if (score == null) {
         const dashboard = buildTechniqueDashboard(summary)
@@ -139,12 +132,10 @@ export default async function HomePage() {
         } else if (tips.length) {
           primaryTip = tips[0]
         }
-        // Persist score for future
         if (Number.isFinite(score)) {
           await service.from('jobs').update({ score }).eq('id', run.id)
         }
       } else {
-        // Already have score, just need the tip
         const dashboard = buildTechniqueDashboard(summary)
         if (dashboard.focusCards.length) {
           primaryTip = dashboard.focusCards[0]
@@ -155,320 +146,286 @@ export default async function HomePage() {
     }
   }
 
-  // Build next-session coaching card from recurring patterns
   const nextSession = buildNextSessionCard(recentTipSets)
-
   const recentRuns = runs.slice(0, 5)
 
   return (
-    <div className="space-y-6">
-      {/* ── Hero section ─────────────────────────────── */}
-      <section className="surface-card hero-arc-bg p-8 lg:p-10">
-        <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
-          <div>
-            <span className="eyebrow">Your coaching hub</span>
-            <h1 className="section-title mt-6">
-              {score != null
-                ? 'Keep the momentum. Your technique is progressing.'
-                : latestCompleted
-                  ? 'Your latest run is ready to review.'
+    <>
+      <div className="route-bg route-bg--dashboard" />
+      <div className="space-y-6">
+        {/* ── Hero: Insight panel + Practice cards ────── */}
+        <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+          {/* What stands out first */}
+          <section className="surface-card p-8 lg:p-10">
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>What stands out first</p>
+
+            <h1
+              className="mt-5"
+              style={{ fontSize: 'clamp(1.6rem, 2.8vw, 2.4rem)', fontWeight: 800, lineHeight: 1.15, letterSpacing: '-0.03em', color: 'var(--ink-strong)' }}
+            >
+              {primaryTip
+                ? primaryTip.explanation
+                : score != null
+                  ? 'Your latest analysis is ready. Review your technique below.'
                   : 'Upload your first run to start coaching.'}
             </h1>
-            <p className="section-copy mt-4 max-w-xl">
-              {score != null
-                ? 'Review your latest analysis, track your level, and focus on what matters most for your next session.'
-                : 'Drop a video from the slopes and get back an AI-powered recap with technique scores, key moments, and practice priorities.'}
-            </p>
+
+            {/* Stat tiles */}
+            <div className="mt-8 grid gap-4 sm:grid-cols-2">
+              <div className="metric-tile">
+                <div className="flex items-center justify-between">
+                  <p className="metric-value">{score ?? '—'}</p>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 15l-3-3m0 0l3-3m-3 3h8M3 12a9 9 0 1118 0 9 9 0 01-18 0z" />
+                  </svg>
+                </div>
+                <p className="metric-label">Best single-turn quality score</p>
+              </div>
+              <div className="metric-tile">
+                <div className="flex items-center justify-between">
+                  <p className="metric-value">{scoredRuns.length > 0 ? scoredRuns.length : '—'}</p>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                </div>
+                <p className="metric-label">Runs with technique scores</p>
+              </div>
+              <div className="metric-tile">
+                <div className="flex items-center justify-between">
+                  <p className="metric-value">{completedRuns.length}</p>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                </div>
+                <p className="metric-label">Artifacts ready to inspect or export</p>
+              </div>
+              <div className="metric-tile">
+                <div className="flex items-center justify-between">
+                  <p className="metric-value">{bestRecentScore ?? '—'}</p>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14" />
+                  </svg>
+                </div>
+                <p className="metric-label">Key images surfaced from the run</p>
+              </div>
+            </div>
 
             <div className="mt-6 flex flex-wrap gap-3">
               <Link href="/upload" className="cta-primary">
                 Analyse a new run
               </Link>
-              <Link href="/jobs" className="cta-secondary">
-                {runs.length ? `View archive` : 'Start your archive'}
-              </Link>
-            </div>
-          </div>
-
-          {/* Score ring or empty state */}
-          <div className="flex items-center justify-center">
-            {score != null && level != null ? (
-              <div className="text-center">
-                <div className="score-ring mx-auto" style={{ width: '11rem', height: '11rem' }}>
-                  <div className="score-ring-glow" />
-                  <svg width="176" height="176" viewBox="0 0 176 176">
-                    <circle cx="88" cy="88" r="74" fill="none" stroke="rgba(31,42,51,0.06)" strokeWidth="8" />
-                    <circle
-                      cx="88" cy="88" r="74"
-                      fill="none"
-                      stroke="url(#scoreGradHome)"
-                      strokeWidth="8"
-                      strokeLinecap="round"
-                      strokeDasharray="464.96"
-                      strokeDashoffset={464.96 - (score / 100) * 464.96}
-                    />
-                    <defs>
-                      <linearGradient id="scoreGradHome" x1="0" y1="0" x2="1" y2="1">
-                        <stop offset="0%" stopColor="#4f8fb3" />
-                        <stop offset="100%" stopColor="#c79a44" />
-                      </linearGradient>
-                    </defs>
-                  </svg>
-                  <div className="score-ring-label">
-                    <span
-                      className="font-bold tracking-tight"
-                      style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', fontWeight: 700, color: 'var(--ink-strong)' }}
-                    >
-                      {score}
-                    </span>
-                    <span className="text-xs mt-1" style={{ color: 'var(--ink-soft)' }}>
-                      technique
-                    </span>
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center justify-center gap-2">
-                  <span className={levelBadgeClass(level)}>{level}</span>
-                  {scoreDelta != null && (
-                    <span
-                      className="text-xs font-bold px-2 py-0.5 rounded-full"
-                      style={{
-                        color: scoreDelta >= 0 ? 'var(--success)' : 'var(--danger)',
-                        background: scoreDelta >= 0 ? 'var(--success-dim)' : 'var(--danger-dim)',
-                      }}
-                    >
-                      {scoreDelta >= 0 ? '+' : ''}{scoreDelta}
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm mt-3" style={{ color: 'var(--ink-soft)' }}>
-                  Latest completed run
-                </p>
-              </div>
-            ) : (
-              <div
-                className="surface-card-muted p-8 text-center w-full"
-                style={{ maxWidth: '20rem' }}
-              >
-                <div
-                  className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-                  style={{ background: 'rgba(31,42,51,0.03)', border: '1px solid var(--line-soft)' }}
-                >
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ink-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                  </svg>
-                </div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>
-                  {latestCompleted ? 'Summary pending' : 'No completed runs yet'}
-                </p>
-                <p className="text-sm mt-2" style={{ color: 'var(--ink-soft)' }}>
-                  {latestCompleted
-                    ? 'Your run completed but the summary data is still processing.'
-                    : 'Your technique score and level will appear here after your first analysis.'}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Progression widgets ──────────────────────── */}
-      {scoredRuns.length > 0 && (
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="metric-tile">
-            <p className="metric-value">{latestScore}</p>
-            <p className="metric-label">Latest score</p>
-          </div>
-          <div className="metric-tile">
-            <p className="metric-value" style={{ color: scoreDelta != null && scoreDelta >= 0 ? 'var(--success)' : scoreDelta != null ? 'var(--danger)' : 'var(--ink-strong)' }}>
-              {scoreDelta != null ? `${scoreDelta >= 0 ? '+' : ''}${scoreDelta}` : '—'}
-            </p>
-            <p className="metric-label">Delta vs previous</p>
-          </div>
-          <div className="metric-tile">
-            <p className="metric-value">{bestRecentScore ?? '—'}</p>
-            <p className="metric-label">Best recent run</p>
-          </div>
-          <div className="metric-tile">
-            {recentTrend.length > 1 ? (
-              <div className="flex items-end gap-1 h-8">
-                {[...recentTrend].reverse().map((s, i) => (
-                  <div
-                    key={i}
-                    className="flex-1 rounded-sm"
-                    style={{
-                      height: `${Math.max(20, (s / 100) * 100)}%`,
-                      background: i === recentTrend.length - 1 ? 'var(--accent)' : 'rgba(31,42,51,0.08)',
-                    }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <p className="metric-value">—</p>
-            )}
-            <p className="metric-label">Recent trend ({recentTrend.length} runs)</p>
-          </div>
-        </section>
-      )}
-
-      {/* ── Coaching focus + next session ─────────────── */}
-      <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-        {/* Primary coaching focus */}
-        <section className="surface-card-strong p-6">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Primary focus</p>
-              <h2 className="mt-1 text-xl font-semibold tracking-tight" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
-                {primaryTip ? primaryTip.title : 'Your next focus'}
-              </h2>
-            </div>
-            <span className="status-pill" style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}>
-              Coaching
-            </span>
-          </div>
-
-          {primaryTip ? (
-            <div className="mt-5">
-              <div className="coaching-card">
-                <p className="text-base leading-7 pl-3" style={{ color: 'var(--ink-base)' }}>
-                  {primaryTip.explanation}
-                </p>
-                <p className="mt-3 text-xs pl-3" style={{ color: 'var(--ink-muted)' }}>
-                  {primaryTip.evidence}
-                </p>
-              </div>
-
               {latestCompleted && (
-                <Link href={`/jobs/${latestCompleted.id}`} className="cta-secondary w-full mt-4">
+                <Link href={`/jobs/${latestCompleted.id}`} className="cta-secondary">
                   Open full run recap
                 </Link>
               )}
             </div>
-          ) : (
-            <div className="mt-5 surface-card-muted p-6 text-sm" style={{ color: 'var(--ink-soft)' }}>
-              {latestCompleted
-                ? 'No coaching tips are available for this run. Open the recap for full details.'
-                : 'Upload and complete your first run to receive personalised coaching focus cards.'}
-              {latestCompleted && (
-                <Link href={`/jobs/${latestCompleted.id}`} className="cta-secondary w-full mt-4">
-                  Open run recap
-                </Link>
-              )}
-            </div>
-          )}
-        </section>
+          </section>
 
-        {/* Next session coaching card */}
-        <section className="surface-card p-6">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>What next?</p>
-              <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
-                Next session
-              </h2>
-            </div>
-            <span className="status-pill" style={{ color: 'var(--gold)', background: 'var(--gold-dim)' }}>
-              Practice plan
-            </span>
-          </div>
+          {/* Practice cards */}
+          <section className="surface-card-strong p-6 lg:p-8 self-start">
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Practice Cards</p>
 
-          <p className="mt-4 text-sm leading-6" style={{ color: 'var(--ink-base)' }}>
-            {nextSession.headline}
-          </p>
-
-          {nextSession.drills.length > 0 ? (
-            <div className="mt-5 space-y-3">
-              {nextSession.drills.map((drill) => (
+            <div className="mt-5 space-y-4">
+              {(nextSession.drills.length > 0 ? nextSession.drills : []).slice(0, 3).map((drill) => (
                 <div key={drill.id} className={`coaching-card coaching-accent-${drill.category}`}>
-                  <div className="flex items-center justify-between gap-3 pl-3">
-                    <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>
-                      {drill.title}
-                    </p>
-                    <span
-                      className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${CATEGORY_BADGE[drill.category] ?? 'category-badge-general'}`}
-                    >
-                      {CATEGORY_ICON[drill.category] ?? drill.category}
-                    </span>
-                  </div>
+                  <p className="text-sm font-bold pl-3" style={{ color: 'var(--ink-strong)' }}>
+                    {drill.title}
+                  </p>
                   <p className="mt-2 text-sm leading-6 pl-3" style={{ color: 'var(--ink-soft)' }}>
                     {drill.description}
                   </p>
-                  {drill.priority > 1 && (
-                    <p className="mt-2 text-xs font-semibold pl-3" style={{ color: 'var(--gold)' }}>
-                      Recurring across {drill.priority} recent runs
-                    </p>
-                  )}
+                  <div className="mt-3 pl-3 flex items-center justify-between">
+                    <span
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CATEGORY_BADGE[drill.category] ?? 'category-badge-general'}`}
+                    >
+                      {CATEGORY_ICON[drill.category] ?? drill.category}
+                    </span>
+                    {latestCompleted && (
+                      <Link
+                        href={`/jobs/${latestCompleted.id}`}
+                        className="inline-flex items-center gap-1 text-xs font-semibold"
+                        style={{ color: 'var(--ink-soft)' }}
+                      >
+                        Watch
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M5 12h14M12 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                    )}
+                  </div>
                 </div>
               ))}
+
+              {primaryTip && (
+                <div className="coaching-card">
+                  <p className="text-sm font-bold pl-3" style={{ color: 'var(--ink-strong)' }}>
+                    {primaryTip.title}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 pl-3" style={{ color: 'var(--ink-soft)' }}>
+                    {primaryTip.explanation}
+                  </p>
+                  {latestCompleted && (
+                    <div className="mt-3 pl-3">
+                      <Link
+                        href={`/jobs/${latestCompleted.id}`}
+                        className="inline-flex items-center gap-1 text-xs font-semibold"
+                        style={{ color: 'var(--ink-soft)' }}
+                      >
+                        Watch
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M5 12h14M12 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!primaryTip && nextSession.drills.length === 0 && (
+                <div className="surface-card-muted p-6 text-sm text-center" style={{ color: 'var(--ink-soft)' }}>
+                  Upload and complete your first run to receive personalised coaching focus cards.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+
+        {/* ── Progression + Score ring ────────────────── */}
+        {scoredRuns.length > 0 && (
+          <div className="grid gap-6 lg:grid-cols-[0.4fr_1fr]">
+            <section className="surface-card p-6 flex flex-col items-center justify-center">
+              <div className="score-ring mx-auto" style={{ width: '10rem', height: '10rem' }}>
+                <div className="score-ring-glow" />
+                <svg width="160" height="160" viewBox="0 0 160 160">
+                  <circle cx="80" cy="80" r="68" fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="7" />
+                  <circle
+                    cx="80" cy="80" r="68"
+                    fill="none"
+                    stroke="url(#scoreGradHome)"
+                    strokeWidth="7"
+                    strokeLinecap="round"
+                    strokeDasharray="427.26"
+                    strokeDashoffset={427.26 - ((score ?? 0) / 100) * 427.26}
+                  />
+                  <defs>
+                    <linearGradient id="scoreGradHome" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor="#0084d4" />
+                      <stop offset="100%" stopColor="#c79a44" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+                <div className="score-ring-label">
+                  <span className="font-extrabold tracking-tight" style={{ fontSize: '2.5rem', color: 'var(--ink-strong)' }}>
+                    {score}
+                  </span>
+                  <span className="text-xs mt-1" style={{ color: 'var(--ink-soft)' }}>technique</span>
+                </div>
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                {level && <span className={levelBadgeClass(level)}>{level}</span>}
+                {scoreDelta != null && (
+                  <span
+                    className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{
+                      color: scoreDelta >= 0 ? 'var(--success)' : 'var(--danger)',
+                      background: scoreDelta >= 0 ? 'var(--success-dim)' : 'var(--danger-dim)',
+                    }}
+                  >
+                    {scoreDelta >= 0 ? '+' : ''}{scoreDelta}
+                  </span>
+                )}
+              </div>
+            </section>
+
+            <section className="surface-card p-6">
+              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Progression</p>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="metric-tile">
+                  <p className="metric-value">{latestScore}</p>
+                  <p className="metric-label">Latest score</p>
+                </div>
+                <div className="metric-tile">
+                  <p className="metric-value" style={{ color: scoreDelta != null && scoreDelta >= 0 ? 'var(--success)' : scoreDelta != null ? 'var(--danger)' : 'var(--ink-strong)' }}>
+                    {scoreDelta != null ? `${scoreDelta >= 0 ? '+' : ''}${scoreDelta}` : '—'}
+                  </p>
+                  <p className="metric-label">Delta vs previous</p>
+                </div>
+                <div className="metric-tile">
+                  <p className="metric-value">{bestRecentScore ?? '—'}</p>
+                  <p className="metric-label">Best recent run</p>
+                </div>
+                <div className="metric-tile">
+                  <p className="metric-value">{completedRuns.length}</p>
+                  <p className="metric-label">Completed recaps</p>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {/* ── Archive preview ──────────────────────────── */}
+        <section className="surface-card p-6">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Recent runs</p>
+              <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                Archive
+              </h2>
+            </div>
+            <Link href="/jobs" className="cta-secondary text-sm" style={{ padding: '0.5rem 0.9rem' }}>
+              View all
+            </Link>
+          </div>
+
+          {!recentRuns.length ? (
+            <div className="surface-card-muted p-8 text-center mt-5">
+              <p className="text-sm" style={{ color: 'var(--ink-soft)' }}>
+                Your runs will appear here.
+              </p>
             </div>
           ) : (
-            <div className="mt-5 surface-card-muted p-6 text-sm" style={{ color: 'var(--ink-soft)' }}>
-              Upload more runs to build your personalised practice plan. We look for patterns across your recent sessions to suggest drills.
-            </div>
+            <ul className="space-y-2 mt-5">
+              {recentRuns.map((job: Job) => {
+                const filename =
+                  String(job.config?.original_filename ?? '') ||
+                  job.video_object_path?.split('/').pop() ||
+                  job.id.slice(0, 8)
+                return (
+                  <li key={job.id}>
+                    <Link
+                      href={`/jobs/${job.id}`}
+                      className="surface-card-muted flex items-center gap-3 px-4 py-3 group transition-transform hover:-translate-y-0.5"
+                      style={{ display: 'flex' }}
+                    >
+                      <div
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ background: STATUS_DOT[job.status as JobStatus] }}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate" style={{ color: 'var(--ink-strong)' }}>
+                          {filename}
+                        </p>
+                      </div>
+                      {job.score != null && (
+                        <span className="text-xs font-bold shrink-0" style={{ color: 'var(--accent)' }}>
+                          {job.score}
+                        </span>
+                      )}
+                      <span className="text-xs shrink-0" style={{ color: 'var(--ink-muted)' }}>
+                        {STATUS_LABEL[job.status as JobStatus]}
+                      </span>
+                      <span className="text-xs shrink-0" style={{ color: 'var(--ink-muted)' }}>
+                        {new Date(job.created_at).toLocaleDateString()}
+                      </span>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
           )}
         </section>
       </div>
-
-      {/* ── Archive preview ──────────────────────────── */}
-      <section className="surface-card p-6">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Recent runs</p>
-            <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
-              Archive
-            </h2>
-          </div>
-          <Link href="/jobs" className="cta-secondary text-sm" style={{ padding: '0.5rem 0.9rem' }}>
-            View all
-          </Link>
-        </div>
-
-        {!recentRuns.length ? (
-          <div className="surface-card-muted p-8 text-center mt-5">
-            <p className="text-sm" style={{ color: 'var(--ink-soft)' }}>
-              Your runs will appear here.
-            </p>
-          </div>
-        ) : (
-          <ul className="space-y-2 mt-5">
-            {recentRuns.map((job: Job) => {
-              const filename =
-                String(job.config?.original_filename ?? '') ||
-                job.video_object_path?.split('/').pop() ||
-                job.id.slice(0, 8)
-              return (
-                <li key={job.id}>
-                  <Link
-                    href={`/jobs/${job.id}`}
-                    className="surface-card-muted flex items-center gap-3 px-4 py-3 group transition-transform hover:-translate-y-0.5"
-                    style={{ display: 'flex' }}
-                  >
-                    <div
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ background: STATUS_DOT[job.status as JobStatus] }}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium truncate" style={{ color: 'var(--ink-strong)' }}>
-                        {filename}
-                      </p>
-                    </div>
-                    {job.score != null && (
-                      <span className="text-xs font-bold shrink-0" style={{ color: 'var(--accent)' }}>
-                        {job.score}
-                      </span>
-                    )}
-                    <span className="text-xs shrink-0" style={{ color: 'var(--ink-muted)' }}>
-                      {STATUS_LABEL[job.status as JobStatus]}
-                    </span>
-                    <span className="text-xs shrink-0" style={{ color: 'var(--ink-muted)' }}>
-                      {new Date(job.created_at).toLocaleDateString()}
-                    </span>
-                  </Link>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </section>
-    </div>
+    </>
   )
 }

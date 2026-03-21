@@ -21,7 +21,7 @@ const STATUS_META: Record<JobStatus, { label: string; color: string; background:
   created: {
     label: 'Job created',
     color: 'var(--ink-soft)',
-    background: 'rgba(31,42,51,0.04)',
+    background: 'rgba(0,0,0,0.04)',
     helper: 'Your upload slot is ready.',
   },
   uploaded: {
@@ -59,7 +59,7 @@ const STATUS_META: Record<JobStatus, { label: string; color: string; background:
 const TIP_META: Record<CoachingTip['severity'], { label: string; color: string; background: string }> = {
   action: { label: 'Action', color: 'var(--gold)', background: 'var(--gold-dim)' },
   warn: { label: 'Watch', color: 'var(--accent)', background: 'var(--accent-dim)' },
-  info: { label: 'Note', color: 'var(--ink-soft)', background: 'rgba(31,42,51,0.04)' },
+  info: { label: 'Note', color: 'var(--ink-soft)', background: 'rgba(0,0,0,0.04)' },
 }
 
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -117,10 +117,6 @@ function coachingHeadline(job: Job, summary: TechniqueRunSummary | null) {
   return 'Your run is progressing through the queue. The recap will refresh automatically.'
 }
 
-function metricTierClass(value: number, threshold: number): string {
-  return value >= threshold ? 'metric-tile metric-tile--high' : 'metric-tile metric-tile--low'
-}
-
 function metricDotColor(value: number, threshold: number): string {
   return value >= threshold ? 'var(--accent)' : 'var(--gold)'
 }
@@ -171,26 +167,32 @@ export default function JobDetailPage() {
 
   if (fetchError && !data) {
     return (
-      <div className="space-y-4">
-        <div
-          className="surface-card-strong p-6"
-          style={{ color: 'var(--danger)', background: 'var(--danger-dim)' }}
-        >
-          {fetchError}
+      <>
+        <div className="route-bg route-bg--archive" />
+        <div className="space-y-4">
+          <div
+            className="surface-card-strong p-6"
+            style={{ color: 'var(--danger)', background: 'var(--danger-dim)' }}
+          >
+            {fetchError}
+          </div>
+          <Link href="/jobs" className="cta-secondary">
+            Back to archive
+          </Link>
         </div>
-        <Link href="/jobs" className="cta-secondary">
-          Back to archive
-        </Link>
-      </div>
+      </>
     )
   }
 
   if (!data) {
     return (
-      <div className="space-y-4 animate-pulse">
-        <div className="h-6 w-36 rounded-full" style={{ background: 'rgba(31,42,51,0.08)' }} />
-        <div className="surface-card h-[24rem]" />
-      </div>
+      <>
+        <div className="route-bg route-bg--archive" />
+        <div className="space-y-4 animate-pulse">
+          <div className="h-6 w-36 rounded-full" style={{ background: 'rgba(0,0,0,0.08)' }} />
+          <div className="surface-card h-[24rem]" />
+        </div>
+      </>
     )
   }
 
@@ -217,579 +219,582 @@ export default function JobDetailPage() {
     job.id.slice(0, 8)
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
-        <Link href="/jobs" className="hover:underline">Archive</Link>
-        <span>/</span>
-        <span className="font-mono" style={{ color: 'var(--ink-strong)' }}>{breadcrumbName}</span>
-      </div>
+    <>
+      <div className="route-bg route-bg--archive" />
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
+          <Link href="/jobs" className="hover:underline">Archive</Link>
+          <span>/</span>
+          <span className="font-mono" style={{ color: 'var(--ink-strong)' }}>{breadcrumbName}</span>
+        </div>
 
-      {/* ── Score-first hero ─────────────────────────── */}
-      <section className="surface-card p-6 lg:p-7">
-        <div className="grid gap-6 lg:grid-cols-[1.16fr_0.84fr]">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="space-y-3">
-                <div className="flex items-center gap-4 flex-wrap">
-                  {score != null && (
-                    <div className="score-ring" style={{ width: '11.25rem', height: '11.25rem' }}>
-                      <div className="score-ring-glow" />
-                      <svg width="180" height="180" viewBox="0 0 180 180">
-                        <circle cx="90" cy="90" r="76" fill="none" stroke="rgba(31,42,51,0.06)" strokeWidth="8" />
-                        <circle
-                          cx="90" cy="90" r="76"
-                          fill="none"
-                          stroke="url(#scoreGradDetail)"
-                          strokeWidth="8"
-                          strokeLinecap="round"
-                          strokeDasharray="477.52"
-                          strokeDashoffset={477.52 - (score / 100) * 477.52}
-                        />
-                        <defs>
-                          <linearGradient id="scoreGradDetail" x1="0" y1="0" x2="1" y2="1">
-                            <stop offset="0%" stopColor="#4f8fb3" />
-                            <stop offset="100%" stopColor="#c79a44" />
-                          </linearGradient>
-                        </defs>
-                      </svg>
-                      <div className="score-ring-label">
+        {/* ── Score-first hero ─────────────────────────── */}
+        <section className="surface-card p-6 lg:p-7">
+          <div className="grid gap-6 lg:grid-cols-[1.16fr_0.84fr]">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-4 flex-wrap">
+                    {score != null && (
+                      <div className="score-ring" style={{ width: '11.25rem', height: '11.25rem' }}>
+                        <div className="score-ring-glow" />
+                        <svg width="180" height="180" viewBox="0 0 180 180">
+                          <circle cx="90" cy="90" r="76" fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="8" />
+                          <circle
+                            cx="90" cy="90" r="76"
+                            fill="none"
+                            stroke="url(#scoreGradDetail)"
+                            strokeWidth="8"
+                            strokeLinecap="round"
+                            strokeDasharray="477.52"
+                            strokeDashoffset={477.52 - (score / 100) * 477.52}
+                          />
+                          <defs>
+                            <linearGradient id="scoreGradDetail" x1="0" y1="0" x2="1" y2="1">
+                              <stop offset="0%" stopColor="#0084d4" />
+                              <stop offset="100%" stopColor="#c79a44" />
+                            </linearGradient>
+                          </defs>
+                        </svg>
+                        <div className="score-ring-label">
+                          <span
+                            className="font-extrabold tracking-tight"
+                            style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', color: 'var(--ink-strong)' }}
+                          >
+                            {score}
+                          </span>
+                          <span className="text-xs mt-1" style={{ color: 'var(--ink-soft)' }}>technique</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      {level && (
+                        <span className={levelBadgeClass(level)}>{level}</span>
+                      )}
+                      {scoreDelta != null && (
                         <span
-                          className="font-bold tracking-tight"
-                          style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', fontWeight: 700, color: 'var(--ink-strong)' }}
+                          className="text-sm font-bold px-2.5 py-1 rounded-full block w-fit"
+                          style={{
+                            color: scoreDelta >= 0 ? 'var(--success)' : 'var(--danger)',
+                            background: scoreDelta >= 0 ? 'var(--success-dim)' : 'var(--danger-dim)',
+                          }}
                         >
-                          {score}
+                          {scoreDelta >= 0 ? '+' : ''}{scoreDelta} vs prev
                         </span>
-                        <span className="text-xs mt-1" style={{ color: 'var(--ink-soft)' }}>technique</span>
-                      </div>
+                      )}
                     </div>
-                  )}
-                  <div className="space-y-2">
-                    {level && (
-                      <span className={levelBadgeClass(level)}>{level}</span>
-                    )}
-                    {scoreDelta != null && (
-                      <span
-                        className="text-sm font-bold px-2.5 py-1 rounded-full block w-fit"
-                        style={{
-                          color: scoreDelta >= 0 ? 'var(--success)' : 'var(--danger)',
-                          background: scoreDelta >= 0 ? 'var(--success-dim)' : 'var(--danger-dim)',
-                        }}
-                      >
-                        {scoreDelta >= 0 ? '+' : ''}{scoreDelta} vs prev
-                      </span>
-                    )}
                   </div>
+                  <span className="eyebrow">Run recap</span>
+                  <h1 style={{ fontSize: 'clamp(1.8rem, 3vw, 2.8rem)', fontWeight: 800, letterSpacing: '-0.04em', color: 'var(--ink-strong)' }}>
+                    {score != null ? headline.slice(0, 80) : 'Review how this run moved.'}
+                  </h1>
                 </div>
-                <span className="eyebrow">Run recap</span>
-                <h1 style={{ fontSize: 'clamp(1.8rem, 3vw, 2.8rem)', fontWeight: 700, letterSpacing: '-0.06em', color: 'var(--ink-strong)' }}>
-                  {score != null ? headline.slice(0, 80) : 'Review how this run moved.'}
-                </h1>
-              </div>
-              <span className="status-pill" style={{ color: statusMeta.color, background: statusMeta.background }}>
-                {statusMeta.label}
-              </span>
-            </div>
-
-            {overlayArtifact?.url ? (
-              <div
-                className="overflow-hidden rounded-[1.6rem]"
-                style={{ background: '#0a0f1a', border: '1px solid var(--line-soft)' }}
-              >
-                <video src={overlayArtifact.url} controls playsInline className="w-full aspect-video bg-black" />
-              </div>
-            ) : (
-              <div
-                className="rounded-[1.6rem] aspect-video flex items-center justify-center text-center p-8"
-                style={{ background: 'rgba(31,42,51,0.03)', border: '1px solid var(--line-soft)', color: 'var(--ink-soft)' }}
-              >
-                Overlay video will appear here once the run is fully processed.
-              </div>
-            )}
-          </div>
-
-          <aside className="space-y-4">
-            <div className="surface-card-muted p-5">
-              <p className="text-xs uppercase tracking-[0.22em]" style={{ color: 'var(--ink-muted)' }}>
-                Coaching headline
-              </p>
-              <p className="mt-3 text-base leading-7 font-medium" style={{ color: 'var(--ink-strong)' }}>
-                {headline}
-              </p>
-
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <div className={dashboard && dashboard.overview.overallScore > 60 ? 'metric-tile metric-tile--high' : dashboard ? 'metric-tile metric-tile--low' : 'metric-tile'}>
-                  <div className="metric-tile-dot" style={{ background: dashboard ? metricDotColor(dashboard.overview.overallScore, 60) : 'var(--ink-muted)' }} />
-                  <p className="metric-value" style={{ color: dashboard && dashboard.overview.overallScore > 60 ? 'var(--accent)' : 'var(--gold)' }}>
-                    {dashboard ? dashboard.overview.overallScore : '—'}
-                  </p>
-                  <p className="metric-label">Technique score</p>
-                </div>
-                <div className="metric-tile">
-                  <p className="metric-value">{dashboard ? dashboard.overview.turnsDetected : artifacts.length}</p>
-                  <p className="metric-label">{dashboard ? 'Turns detected' : 'Artifacts ready'}</p>
-                </div>
-                <div className="metric-tile">
-                  <p className="metric-value">{dashboard ? `${dashboard.overview.edgeAngle.toFixed(0)}°` : '—'}</p>
-                  <p className="metric-label">Average edge angle</p>
-                </div>
-                <div className={dashboard && dashboard.overview.poseConfidence > 70 ? 'metric-tile metric-tile--high' : dashboard ? 'metric-tile metric-tile--low' : 'metric-tile'}>
-                  <div className="metric-tile-dot" style={{ background: dashboard ? metricDotColor(dashboard.overview.poseConfidence, 70) : 'var(--ink-muted)' }} />
-                  <p className="metric-value" style={{ color: dashboard && dashboard.overview.poseConfidence > 70 ? 'var(--accent)' : 'var(--gold)' }}>
-                    {dashboard ? `${dashboard.overview.poseConfidence.toFixed(0)}%` : '—'}
-                  </p>
-                  <p className="metric-label">Pose confidence</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="surface-card-muted p-5">
-              <p className="text-xs uppercase tracking-[0.22em]" style={{ color: 'var(--ink-muted)' }}>
-                Run context
-              </p>
-              <div className="mt-3 space-y-2 text-sm" style={{ color: 'var(--ink-base)' }}>
-                <p>
-                  <span style={{ color: 'var(--ink-muted)' }}>Uploaded:</span>{' '}
-                  {new Date(job.created_at).toLocaleString()}
-                </p>
-                <p>
-                  <span style={{ color: 'var(--ink-muted)' }}>Updated:</span>{' '}
-                  {new Date(job.updated_at).toLocaleString()}
-                </p>
-                <p>
-                  <span style={{ color: 'var(--ink-muted)' }}>Worker note:</span>{' '}
-                  {progressNote ?? statusMeta.helper}
-                </p>
-              </div>
-            </div>
-
-            {isActive && (
-              <div className="surface-card-muted p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>Processing progress</p>
-                  <span style={{ color: 'var(--ink-soft)' }}>Auto refresh</span>
-                </div>
-                <div className="mt-3 progress-track">
-                  <div
-                    className="progress-fill transition-all duration-700"
-                    style={{
-                      width: `${
-                        job.status === 'created' ? 10
-                        : job.status === 'uploaded' ? 20
-                        : job.status === 'queued' ? 30
-                        : 55
-                      }%`,
-                    }}
-                  />
-                </div>
-                <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                  {progressNote ?? statusMeta.helper}
-                </p>
-              </div>
-            )}
-
-            {job.error && (
-              <div
-                className="surface-card-muted p-5 text-sm"
-                style={{ color: 'var(--danger)', background: 'var(--danger-dim)' }}
-              >
-                {job.error}
-              </div>
-            )}
-          </aside>
-        </div>
-      </section>
-
-      <section className="surface-card-strong p-3 flex flex-wrap gap-2">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className="rounded-full px-4 py-2 text-sm font-semibold transition-colors"
-            style={{
-              background: activeTab === tab.id ? 'rgba(31,42,51,0.06)' : 'transparent',
-              color: activeTab === tab.id ? 'var(--ink-strong)' : 'var(--ink-soft)',
-              border: activeTab === tab.id ? '1px solid var(--line-soft)' : '1px solid transparent',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </section>
-
-      {activeTab === 'recap' && (
-        <div className="grid gap-6 lg:grid-cols-[1.02fr_0.98fr]">
-          <section className="surface-card p-6">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Run recap</p>
-                <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
-                  What stands out first
-                </h2>
-              </div>
-              {dashboard?.overview.smoothnessScore != null && (
-                <span className="status-pill" style={{ color: 'var(--success)', background: 'var(--success-dim)' }}>
-                  Smoothness {dashboard.overview.smoothnessScore}
+                <span className="status-pill" style={{ color: statusMeta.color, background: statusMeta.background }}>
+                  {statusMeta.label}
                 </span>
+              </div>
+
+              {overlayArtifact?.url ? (
+                <div
+                  className="overflow-hidden"
+                  style={{ borderRadius: 'var(--radius-xl)', background: '#0a0f1a', border: '1px solid rgba(255,255,255,0.15)' }}
+                >
+                  <video src={overlayArtifact.url} controls playsInline className="w-full aspect-video bg-black" />
+                </div>
+              ) : (
+                <div
+                  className="aspect-video flex items-center justify-center text-center p-8"
+                  style={{ borderRadius: 'var(--radius-xl)', background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.06)', color: 'var(--ink-soft)' }}
+                >
+                  Overlay video will appear here once the run is fully processed.
+                </div>
               )}
             </div>
 
-            <p className="mt-4 text-base leading-7" style={{ color: 'var(--ink-base)' }}>
-              {headline}
-            </p>
-
-            {dashboard ? (
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                <div className="metric-tile">
-                  <p className="metric-value">{dashboard.overview.bestTurnScore}</p>
-                  <p className="metric-label">Best single-turn quality score</p>
-                </div>
-                <div className="metric-tile">
-                  <p className="metric-value">{dashboard.overview.turnsDetected}</p>
-                  <p className="metric-label">Turns included in the coaching pass</p>
-                </div>
-                <div className="metric-tile">
-                  <p className="metric-value">{downloads.length}</p>
-                  <p className="metric-label">Artifacts ready to inspect or export</p>
-                </div>
-                <div className="metric-tile">
-                  <p className="metric-value">{coolMomentPhotos.length + peakFrames.length}</p>
-                  <p className="metric-label">Key images surfaced from the run</p>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-6 surface-card-muted p-4 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                Summary metrics will appear here once the summary artifact is available.
-              </div>
-            )}
-
-            {!!dashboard?.warnings.length && (
-              <div className="mt-6 surface-card-muted p-4">
-                <p className="text-xs uppercase tracking-[0.22em]" style={{ color: 'var(--ink-muted)' }}>
-                  Capture warnings
+            <aside className="space-y-4">
+              <div className="surface-card-muted p-5">
+                <p className="text-xs uppercase tracking-[0.22em] font-bold" style={{ color: 'var(--ink-muted)' }}>
+                  Coaching headline
                 </p>
-                <ul className="mt-3 space-y-2 text-sm" style={{ color: 'var(--ink-base)' }}>
-                  {dashboard.warnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </section>
+                <p className="mt-3 text-base leading-7 font-semibold" style={{ color: 'var(--ink-strong)' }}>
+                  {headline}
+                </p>
 
-          <section className="surface-card p-6">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Next focus</p>
-                <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
-                  Practice cards
-                </h2>
-              </div>
-              <span className="status-pill" style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}>
-                Coaching tips
-              </span>
-            </div>
-
-            <div className="mt-5 space-y-3">
-              {(dashboard?.focusCards.length ? dashboard.focusCards : summary?.coaching_tips ?? []).slice(0, 4).map((tip) => {
-                const category = tipCategory(tip)
-                const catColors = CATEGORY_COLORS[category] ?? CATEGORY_COLORS.general
-                const CATEGORY_LABELS: Record<string, string> = {
-                  movement: 'Movement', edging: 'Edging', rhythm: 'Rhythm', balance: 'Balance', general: 'General',
-                }
-                return (
-                  <div key={`${tip.title}-${tip.evidence}`} className={`coaching-card ${catColors.accent}`}>
-                    <div className="flex items-center justify-between gap-3 pl-3">
-                      <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>{tip.title}</p>
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${catColors.badge}`}>
-                        {CATEGORY_LABELS[category]}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm leading-6 pl-3" style={{ color: 'var(--ink-base)' }}>
-                      {tip.explanation}
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <div className={dashboard && dashboard.overview.overallScore > 60 ? 'metric-tile metric-tile--high' : dashboard ? 'metric-tile metric-tile--low' : 'metric-tile'}>
+                    <div className="metric-tile-dot" style={{ background: dashboard ? metricDotColor(dashboard.overview.overallScore, 60) : 'var(--ink-muted)' }} />
+                    <p className="metric-value" style={{ color: dashboard && dashboard.overview.overallScore > 60 ? 'var(--accent)' : 'var(--gold)' }}>
+                      {dashboard ? dashboard.overview.overallScore : '—'}
                     </p>
-                    <p className="mt-2 text-xs pl-3" style={{ color: 'var(--ink-muted)' }}>
-                      {tip.evidence}
-                    </p>
-                    <Link
-                      href="#"
-                      className="mt-2 inline-flex items-center gap-1 text-xs pl-3"
-                      style={{ color: 'var(--accent)' }}
-                      onClick={(e) => { e.preventDefault(); setActiveTab('moments') }}
-                    >
-                      Watch
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M5 12h14M12 5l7 7-7 7" />
-                      </svg>
-                    </Link>
+                    <p className="metric-label">Technique score</p>
                   </div>
-                )
-              })}
+                  <div className="metric-tile">
+                    <p className="metric-value">{dashboard ? dashboard.overview.turnsDetected : artifacts.length}</p>
+                    <p className="metric-label">{dashboard ? 'Turns detected' : 'Artifacts ready'}</p>
+                  </div>
+                  <div className="metric-tile">
+                    <p className="metric-value">{dashboard ? `${dashboard.overview.edgeAngle.toFixed(0)}°` : '—'}</p>
+                    <p className="metric-label">Average edge angle</p>
+                  </div>
+                  <div className={dashboard && dashboard.overview.poseConfidence > 70 ? 'metric-tile metric-tile--high' : dashboard ? 'metric-tile metric-tile--low' : 'metric-tile'}>
+                    <div className="metric-tile-dot" style={{ background: dashboard ? metricDotColor(dashboard.overview.poseConfidence, 70) : 'var(--ink-muted)' }} />
+                    <p className="metric-value" style={{ color: dashboard && dashboard.overview.poseConfidence > 70 ? 'var(--accent)' : 'var(--gold)' }}>
+                      {dashboard ? `${dashboard.overview.poseConfidence.toFixed(0)}%` : '—'}
+                    </p>
+                    <p className="metric-label">Pose confidence</p>
+                  </div>
+                </div>
+              </div>
 
-              {!summary?.coaching_tips?.length && (
-                <div className="surface-card-muted p-4 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                  Tip cards appear when the summary JSON includes coaching guidance.
+              <div className="surface-card-muted p-5">
+                <p className="text-xs uppercase tracking-[0.22em] font-bold" style={{ color: 'var(--ink-muted)' }}>
+                  Run context
+                </p>
+                <div className="mt-3 space-y-2 text-sm" style={{ color: 'var(--ink-base)' }}>
+                  <p>
+                    <span style={{ color: 'var(--ink-muted)' }}>Uploaded:</span>{' '}
+                    {new Date(job.created_at).toLocaleString()}
+                  </p>
+                  <p>
+                    <span style={{ color: 'var(--ink-muted)' }}>Updated:</span>{' '}
+                    {new Date(job.updated_at).toLocaleString()}
+                  </p>
+                  <p>
+                    <span style={{ color: 'var(--ink-muted)' }}>Worker note:</span>{' '}
+                    {progressNote ?? statusMeta.helper}
+                  </p>
+                </div>
+              </div>
+
+              {isActive && (
+                <div className="surface-card-muted p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-bold" style={{ color: 'var(--ink-strong)' }}>Processing progress</p>
+                    <span style={{ color: 'var(--ink-soft)' }}>Auto refresh</span>
+                  </div>
+                  <div className="mt-3 progress-track">
+                    <div
+                      className="progress-fill transition-all duration-700"
+                      style={{
+                        width: `${
+                          job.status === 'created' ? 10
+                          : job.status === 'uploaded' ? 20
+                          : job.status === 'queued' ? 30
+                          : 55
+                        }%`,
+                      }}
+                    />
+                  </div>
+                  <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                    {progressNote ?? statusMeta.helper}
+                  </p>
                 </div>
               )}
-            </div>
-          </section>
-        </div>
-      )}
 
-      {activeTab === 'metrics' && (
-        <div className="space-y-6">
-          <section className="grid gap-4 lg:grid-cols-2">
-            {dashboard?.categories.map((category) => (
-              <article key={category.id} className="surface-card p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--ink-soft)' }}>{category.title}</p>
-                    <p className="mt-2 text-sm leading-6" style={{ color: 'var(--ink-base)' }}>
-                      Current pipeline metrics mapped into a coaching-friendly bucket.
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <div
-                      className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold"
-                      style={{ background: 'var(--accent-dim)', color: 'var(--ink-strong)' }}
-                    >
-                      {category.score}
-                    </div>
-                    <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--ink-muted)' }}>
-                      {category.status}
-                    </p>
-                  </div>
+              {job.error && (
+                <div
+                  className="surface-card-muted p-5 text-sm"
+                  style={{ color: 'var(--danger)', background: 'var(--danger-dim)' }}
+                >
+                  {job.error}
                 </div>
+              )}
+            </aside>
+          </div>
+        </section>
 
-                <div className="mt-5 space-y-4">
-                  {category.metrics.map((metric) => (
-                    <div key={`${category.id}-${metric.label}`}>
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>{metric.label}</p>
-                        <p className="font-mono text-xs" style={{ color: 'var(--accent)' }}>{metric.value}</p>
-                      </div>
-                      <p className="mt-1 text-sm" style={{ color: 'var(--ink-soft)' }}>{metric.helper}</p>
-                      <div className="mt-3 metric-rail">
-                        <span style={{ width: `${metric.fill}%` }}>
-                          <span className="metric-rail-dot" />
-                        </span>
-                      </div>
-                      <div className="mt-1 flex items-center justify-between text-xs" style={{ color: 'var(--ink-muted)' }}>
-                        <span>{metric.leftLabel}</span>
-                        <span>{metric.rightLabel}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            )) ?? (
-              <article className="surface-card p-6 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                Metrics will appear here once a summary artifact is attached.
-              </article>
-            )}
-          </section>
+        <section className="surface-card-strong p-3 flex flex-wrap gap-2">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className="rounded-full px-4 py-2 text-sm font-semibold transition-colors"
+              style={{
+                background: activeTab === tab.id ? 'rgba(0,0,0,0.06)' : 'transparent',
+                color: activeTab === tab.id ? 'var(--ink-strong)' : 'var(--ink-soft)',
+                border: activeTab === tab.id ? '1px solid rgba(0,0,0,0.06)' : '1px solid transparent',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </section>
 
-          {!!dashboard?.turnHighlights.length && (
+        {activeTab === 'recap' && (
+          <div className="grid gap-6 lg:grid-cols-[1.02fr_0.98fr]">
             <section className="surface-card p-6">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Turn highlights</p>
-                  <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
-                    Best turns in this pass
+                  <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Run recap</p>
+                  <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                    What stands out first
                   </h2>
                 </div>
-                <span className="status-pill" style={{ color: 'var(--success)', background: 'var(--success-dim)' }}>
-                  Technique scores
+                {dashboard?.overview.smoothnessScore != null && (
+                  <span className="status-pill" style={{ color: 'var(--success)', background: 'var(--success-dim)' }}>
+                    Smoothness {dashboard.overview.smoothnessScore}
+                  </span>
+                )}
+              </div>
+
+              <p className="mt-4 text-base leading-7" style={{ color: 'var(--ink-base)' }}>
+                {headline}
+              </p>
+
+              {dashboard ? (
+                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                  <div className="metric-tile">
+                    <p className="metric-value">{dashboard.overview.bestTurnScore}</p>
+                    <p className="metric-label">Best single-turn quality score</p>
+                  </div>
+                  <div className="metric-tile">
+                    <p className="metric-value">{dashboard.overview.turnsDetected}</p>
+                    <p className="metric-label">Turns included in the coaching pass</p>
+                  </div>
+                  <div className="metric-tile">
+                    <p className="metric-value">{downloads.length}</p>
+                    <p className="metric-label">Artifacts ready to inspect or export</p>
+                  </div>
+                  <div className="metric-tile">
+                    <p className="metric-value">{coolMomentPhotos.length + peakFrames.length}</p>
+                    <p className="metric-label">Key images surfaced from the run</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-6 surface-card-muted p-4 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                  Summary metrics will appear here once the summary artifact is available.
+                </div>
+              )}
+
+              {!!dashboard?.warnings.length && (
+                <div className="mt-6 surface-card-muted p-4">
+                  <p className="text-xs uppercase tracking-[0.22em] font-bold" style={{ color: 'var(--ink-muted)' }}>
+                    Capture warnings
+                  </p>
+                  <ul className="mt-3 space-y-2 text-sm" style={{ color: 'var(--ink-base)' }}>
+                    {dashboard.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </section>
+
+            <section className="surface-card p-6">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Next focus</p>
+                  <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                    Practice cards
+                  </h2>
+                </div>
+                <span className="status-pill" style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}>
+                  Coaching tips
                 </span>
               </div>
 
-              <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                {dashboard.turnHighlights.map((turn) => (
-                  <div key={turn.title} className="surface-card-muted p-4">
-                    <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>{turn.title}</p>
-                    <p className="mt-3 text-3xl font-bold tracking-tight" style={{ color: 'var(--ink-strong)', fontVariantNumeric: 'tabular-nums' }}>
-                      {turn.score}
-                    </p>
-                    <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>{turn.detail}</p>
+              <div className="mt-5 space-y-3">
+                {(dashboard?.focusCards.length ? dashboard.focusCards : summary?.coaching_tips ?? []).slice(0, 4).map((tip) => {
+                  const category = tipCategory(tip)
+                  const catColors = CATEGORY_COLORS[category] ?? CATEGORY_COLORS.general
+                  const CATEGORY_LABELS: Record<string, string> = {
+                    movement: 'Movement', edging: 'Edging', rhythm: 'Rhythm', balance: 'Balance', general: 'General',
+                  }
+                  return (
+                    <div key={`${tip.title}-${tip.evidence}`} className={`coaching-card ${catColors.accent}`}>
+                      <div className="flex items-center justify-between gap-3 pl-3">
+                        <p className="text-sm font-bold" style={{ color: 'var(--ink-strong)' }}>{tip.title}</p>
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${catColors.badge}`}>
+                          {CATEGORY_LABELS[category]}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm leading-6 pl-3" style={{ color: 'var(--ink-base)' }}>
+                        {tip.explanation}
+                      </p>
+                      <p className="mt-2 text-xs pl-3" style={{ color: 'var(--ink-muted)' }}>
+                        {tip.evidence}
+                      </p>
+                      <Link
+                        href="#"
+                        className="mt-2 inline-flex items-center gap-1 text-xs font-semibold pl-3"
+                        style={{ color: 'var(--ink-soft)' }}
+                        onClick={(e) => { e.preventDefault(); setActiveTab('moments') }}
+                      >
+                        Watch
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M5 12h14M12 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                    </div>
+                  )
+                })}
+
+                {!summary?.coaching_tips?.length && (
+                  <div className="surface-card-muted p-4 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                    Tip cards appear when the summary JSON includes coaching guidance.
                   </div>
-                ))}
+                )}
               </div>
             </section>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
-      {activeTab === 'moments' && (
-        <div className="space-y-6">
-          <section className="surface-card p-6">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Key moments</p>
-                <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
-                  Review the strongest still frames
-                </h2>
-              </div>
-              <span className="status-pill" style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}>
-                Motion gallery
-              </span>
-            </div>
-
-            {coolMomentPhotos.length ? (
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {coolMomentPhotos.map((photo) => (
-                  <a
-                    key={photo.id}
-                    href={photo.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="moment-card"
-                  >
-                    <img
-                      src={photo.url}
-                      alt={`Turn ${(photo.meta.turn_idx ?? 0) + 1}`}
-                      className="w-full aspect-[4/3] object-cover"
-                    />
-                    <div className="moment-card-overlay">
-                      <p className="text-xs font-mono text-white">
-                        Turn {(photo.meta.turn_idx ?? 0) + 1}
-                        {photo.meta.side ? ` · ${photo.meta.side}` : ''}
-                        {photo.meta.timestamp_s != null ? ` · ${Number(photo.meta.timestamp_s).toFixed(1)}s` : ''}
+        {activeTab === 'metrics' && (
+          <div className="space-y-6">
+            <section className="grid gap-4 lg:grid-cols-2">
+              {dashboard?.categories.map((category) => (
+                <article key={category.id} className="surface-card p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>{category.title}</p>
+                      <p className="mt-2 text-sm leading-6" style={{ color: 'var(--ink-base)' }}>
+                        Current pipeline metrics mapped into a coaching-friendly bucket.
                       </p>
                     </div>
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <div className="mt-5 surface-card-muted p-6 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                No cool-moment photos were attached to this run.
-              </div>
-            )}
-          </section>
-
-          <section className="surface-card p-6">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Peak pressure frames</p>
-                <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
-                  Pressure snapshots across turns
-                </h2>
-              </div>
-              <span className="status-pill" style={{ color: 'var(--gold)', background: 'var(--gold-dim)' }}>
-                {peakFrames.length} frames
-              </span>
-            </div>
-
-            {peakFrames.length ? (
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {peakFrames.map((frame) => (
-                  <a
-                    key={frame.id}
-                    href={frame.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="moment-card"
-                  >
-                    <img
-                      src={frame.url}
-                      alt={`Turn ${(frame.meta.turn_idx ?? 0) + 1}`}
-                      className="w-full aspect-[4/3] object-cover"
-                    />
-                    <div className="moment-card-overlay">
-                      <p className="text-xs font-mono text-white">
-                        Turn {(frame.meta.turn_idx ?? 0) + 1}
-                        {frame.meta.side ? ` · ${frame.meta.side}` : ''}
-                        {frame.meta.timestamp_s != null ? ` · ${Number(frame.meta.timestamp_s).toFixed(1)}s` : ''}
+                    <div className="text-center">
+                      <div
+                        className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-extrabold"
+                        style={{ background: 'var(--accent-dim)', color: 'var(--ink-strong)' }}
+                      >
+                        {category.score}
+                      </div>
+                      <p className="mt-2 text-xs font-bold uppercase tracking-[0.18em]" style={{ color: 'var(--ink-muted)' }}>
+                        {category.status}
                       </p>
                     </div>
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <div className="mt-5 surface-card-muted p-6 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                Peak pressure frames have not been attached to this run yet.
-              </div>
-            )}
-          </section>
-        </div>
-      )}
-
-      {activeTab === 'downloads' && (
-        <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-          <section className="surface-card p-6">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Exports</p>
-              <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
-                Raw files from this run
-              </h2>
-            </div>
-
-            <div className="mt-5 space-y-3">
-              {downloads.length ? downloads.map(({ label, artifact }) => (
-                <a
-                  key={`${label}-${artifact.id}`}
-                  href={artifact.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="surface-card-muted px-4 py-4 flex items-center justify-between gap-4"
-                >
-                  <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--ink-strong)' }}>{label}</p>
-                    <p className="mt-1 text-xs" style={{ color: 'var(--ink-soft)' }}>
-                      Open the signed artifact in a new tab.
-                    </p>
                   </div>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-soft)' }}>
-                    <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/>
-                  </svg>
-                </a>
-              )) : (
-                <div className="surface-card-muted p-5 text-sm" style={{ color: 'var(--ink-soft)' }}>
-                  No export files are ready yet.
+
+                  <div className="mt-5 space-y-4">
+                    {category.metrics.map((metric) => (
+                      <div key={`${category.id}-${metric.label}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-bold" style={{ color: 'var(--ink-strong)' }}>{metric.label}</p>
+                          <p className="font-mono text-xs" style={{ color: 'var(--accent)' }}>{metric.value}</p>
+                        </div>
+                        <p className="mt-1 text-sm" style={{ color: 'var(--ink-soft)' }}>{metric.helper}</p>
+                        <div className="mt-3 metric-rail">
+                          <span style={{ width: `${metric.fill}%` }}>
+                            <span className="metric-rail-dot" />
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center justify-between text-xs" style={{ color: 'var(--ink-muted)' }}>
+                          <span>{metric.leftLabel}</span>
+                          <span>{metric.rightLabel}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              )) ?? (
+                <article className="surface-card p-6 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                  Metrics will appear here once a summary artifact is attached.
+                </article>
+              )}
+            </section>
+
+            {!!dashboard?.turnHighlights.length && (
+              <section className="surface-card p-6">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Turn highlights</p>
+                    <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                      Best turns in this pass
+                    </h2>
+                  </div>
+                  <span className="status-pill" style={{ color: 'var(--success)', background: 'var(--success-dim)' }}>
+                    Technique scores
+                  </span>
+                </div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {dashboard.turnHighlights.map((turn) => (
+                    <div key={turn.title} className="surface-card-muted p-4">
+                      <p className="text-sm font-bold" style={{ color: 'var(--ink-strong)' }}>{turn.title}</p>
+                      <p className="mt-3 text-3xl font-extrabold tracking-tight" style={{ color: 'var(--ink-strong)', fontVariantNumeric: 'tabular-nums' }}>
+                        {turn.score}
+                      </p>
+                      <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>{turn.detail}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'moments' && (
+          <div className="space-y-6">
+            <section className="surface-card p-6">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Key moments</p>
+                  <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                    Review the strongest still frames
+                  </h2>
+                </div>
+                <span className="status-pill" style={{ color: 'var(--accent)', background: 'var(--accent-dim)' }}>
+                  Motion gallery
+                </span>
+              </div>
+
+              {coolMomentPhotos.length ? (
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {coolMomentPhotos.map((photo) => (
+                    <a
+                      key={photo.id}
+                      href={photo.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="moment-card"
+                    >
+                      <img
+                        src={photo.url}
+                        alt={`Turn ${(photo.meta.turn_idx ?? 0) + 1}`}
+                        className="w-full aspect-[4/3] object-cover"
+                      />
+                      <div className="moment-card-overlay">
+                        <p className="text-xs font-mono text-white">
+                          Turn {(photo.meta.turn_idx ?? 0) + 1}
+                          {photo.meta.side ? ` · ${photo.meta.side}` : ''}
+                          {photo.meta.timestamp_s != null ? ` · ${Number(photo.meta.timestamp_s).toFixed(1)}s` : ''}
+                        </p>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-5 surface-card-muted p-6 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                  No cool-moment photos were attached to this run.
                 </div>
               )}
-            </div>
-          </section>
+            </section>
 
-          <section className="surface-card p-6">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Artifacts summary</p>
-              <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink-strong)' }}>
-                What this run produced
-              </h2>
-            </div>
+            <section className="surface-card p-6">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Peak pressure frames</p>
+                  <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                    Pressure snapshots across turns
+                  </h2>
+                </div>
+                <span className="status-pill" style={{ color: 'var(--gold)', background: 'var(--gold-dim)' }}>
+                  {peakFrames.length} frames
+                </span>
+              </div>
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <div className="metric-tile">
-                <p className="metric-value">{artifacts.length}</p>
-                <p className="metric-label">Signed artifacts attached to the run.</p>
-              </div>
-              <div className="metric-tile">
-                <p className="metric-value">{downloads.length}</p>
-                <p className="metric-label">Immediate exports available from this page.</p>
-              </div>
-              <div className="metric-tile">
-                <p className="metric-value">{coolMomentPhotos.length}</p>
-                <p className="metric-label">Cool-moment photos surfaced by the pipeline.</p>
-              </div>
-              <div className="metric-tile">
-                <p className="metric-value">{peakFrames.length}</p>
-                <p className="metric-label">Peak pressure frames available for review.</p>
-              </div>
-            </div>
+              {peakFrames.length ? (
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {peakFrames.map((frame) => (
+                    <a
+                      key={frame.id}
+                      href={frame.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="moment-card"
+                    >
+                      <img
+                        src={frame.url}
+                        alt={`Turn ${(frame.meta.turn_idx ?? 0) + 1}`}
+                        className="w-full aspect-[4/3] object-cover"
+                      />
+                      <div className="moment-card-overlay">
+                        <p className="text-xs font-mono text-white">
+                          Turn {(frame.meta.turn_idx ?? 0) + 1}
+                          {frame.meta.side ? ` · ${frame.meta.side}` : ''}
+                          {frame.meta.timestamp_s != null ? ` · ${Number(frame.meta.timestamp_s).toFixed(1)}s` : ''}
+                        </p>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-5 surface-card-muted p-6 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                  Peak pressure frames have not been attached to this run yet.
+                </div>
+              )}
+            </section>
+          </div>
+        )}
 
-            {summary?.coaching_tips?.length ? (
-              <div className="mt-6 surface-card-muted p-4">
-                <p className="text-xs uppercase tracking-[0.22em]" style={{ color: 'var(--ink-muted)' }}>
-                  Summary notes
-                </p>
-                <p className="mt-3 text-sm leading-6" style={{ color: 'var(--ink-base)' }}>
-                  {summary.coaching_tips[0].explanation}
-                </p>
+        {activeTab === 'downloads' && (
+          <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+            <section className="surface-card p-6">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Exports</p>
+                <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                  Raw files from this run
+                </h2>
               </div>
-            ) : null}
-          </section>
-        </div>
-      )}
-    </div>
+
+              <div className="mt-5 space-y-3">
+                {downloads.length ? downloads.map(({ label, artifact }) => (
+                  <a
+                    key={`${label}-${artifact.id}`}
+                    href={artifact.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="surface-card-muted px-4 py-4 flex items-center justify-between gap-4"
+                  >
+                    <div>
+                      <p className="text-sm font-bold" style={{ color: 'var(--ink-strong)' }}>{label}</p>
+                      <p className="mt-1 text-xs" style={{ color: 'var(--ink-soft)' }}>
+                        Open the signed artifact in a new tab.
+                      </p>
+                    </div>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-soft)' }}>
+                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/>
+                    </svg>
+                  </a>
+                )) : (
+                  <div className="surface-card-muted p-5 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                    No export files are ready yet.
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="surface-card p-6">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--ink-muted)' }}>Artifacts summary</p>
+                <h2 className="mt-1" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                  What this run produced
+                </h2>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="metric-tile">
+                  <p className="metric-value">{artifacts.length}</p>
+                  <p className="metric-label">Signed artifacts attached to the run.</p>
+                </div>
+                <div className="metric-tile">
+                  <p className="metric-value">{downloads.length}</p>
+                  <p className="metric-label">Immediate exports available from this page.</p>
+                </div>
+                <div className="metric-tile">
+                  <p className="metric-value">{coolMomentPhotos.length}</p>
+                  <p className="metric-label">Cool-moment photos surfaced by the pipeline.</p>
+                </div>
+                <div className="metric-tile">
+                  <p className="metric-value">{peakFrames.length}</p>
+                  <p className="metric-label">Peak pressure frames available for review.</p>
+                </div>
+              </div>
+
+              {summary?.coaching_tips?.length ? (
+                <div className="mt-6 surface-card-muted p-4">
+                  <p className="text-xs uppercase tracking-[0.22em] font-bold" style={{ color: 'var(--ink-muted)' }}>
+                    Summary notes
+                  </p>
+                  <p className="mt-3 text-sm leading-6" style={{ color: 'var(--ink-base)' }}>
+                    {summary.coaching_tips[0].explanation}
+                  </p>
+                </div>
+              ) : null}
+            </section>
+          </div>
+        )}
+      </div>
+    </>
   )
 }
