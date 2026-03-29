@@ -734,21 +734,28 @@ def process_job(job: dict) -> None:
             if not full_summary:
                 raise RuntimeError("Detailed summary was not produced, so coach feedback could not be generated.")
 
+            coaching_path: Path | None = None
             _set_progress(job_id, config, "Writing your coach feedback...", step=3, total=5, stage="Writing your coach feedback")
-            from lmstudio_coaching import generate_coaching
+            try:
+                from lmstudio_coaching import generate_coaching
 
-            print(f"[{job_id[:8]}] Calling LM Studio for coaching feedback...")
-            coaching_result = generate_coaching(
-                full_summary,
-                base_url=LMSTUDIO_BASE_URL,
-                api_key=LMSTUDIO_API_KEY,
-                model=LMSTUDIO_MODEL,
-                language=preferred_language,
-            )
-            coaching_path = run_dir / "summary" / "ai_coaching.json"
-            coaching_path.parent.mkdir(parents=True, exist_ok=True)
-            coaching_path.write_text(json.dumps(coaching_result, indent=2))
-            print(f"[{job_id[:8]}] AI coaching ready")
+                print(f"[{job_id[:8]}] Calling LM Studio for coaching feedback...")
+                coaching_result = generate_coaching(
+                    full_summary,
+                    base_url=LMSTUDIO_BASE_URL,
+                    api_key=LMSTUDIO_API_KEY,
+                    model=LMSTUDIO_MODEL,
+                    language=preferred_language,
+                )
+                coaching_path = run_dir / "summary" / "ai_coaching.json"
+                coaching_path.parent.mkdir(parents=True, exist_ok=True)
+                coaching_path.write_text(json.dumps(coaching_result, indent=2))
+                print(f"[{job_id[:8]}] AI coaching ready")
+            except Exception as exc:
+                print(
+                    f"[{job_id[:8]}] WARN: AI coaching unavailable, continuing without it: {exc}",
+                    file=sys.stderr,
+                )
 
             _set_progress(job_id, config, f"Publishing your recap ({n_turns} turn(s) found)...", step=4, total=5, stage="Publishing your recap")
             print(f"[{job_id[:8]}] Uploading recap assets...")
