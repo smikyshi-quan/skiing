@@ -28,7 +28,6 @@ There is no ESLint, Prettier, or test runner configured for the web app. Type-ch
 ### Python pipeline / worker (`MVP/`)
 ```bash
 python MVP/run.py <video.mp4>                       # one-shot analysis, writes to technique-analysis/artifacts/runs/<timestamp>_<name>/
-python MVP/run.py <video.mp4> --pose-engine vision  # Apple Vision backend (macOS 14+, often faster on Apple Silicon)
 python MVP/run.py <video.mp4> --no-overlay          # skip overlay video rendering
 python MVP/worker.py                                # poll loop — main worker entry
 python MVP/worker.py --once                         # process one job and exit
@@ -36,7 +35,7 @@ python MVP/worker.py --recover                      # requeue stale 'running' jo
 python MVP/compare_coaching_models.py [summary.json]  # benchmark local Ollama coaching models
 ```
 
-There is no Python `pyproject.toml`, `requirements.txt`, or virtualenv config checked in. Dependencies are installed ad-hoc in the developer's environment. Known runtime deps: `supabase`, `python-dotenv`, `boto3`, `requests`, `opencv-python`, `mediapipe`, `numpy`, plus Apple `Vision`-framework bindings when `--pose-engine vision` is used.
+There is no Python `pyproject.toml`, `requirements.txt`, or virtualenv config checked in. Dependencies are installed ad-hoc in the developer's environment. Known runtime deps: `supabase`, `python-dotenv`, `boto3`, `requests`, `opencv-python`, `mediapipe`, `ultralytics`, and `numpy`. If MediaPipe cannot initialize its pose graph in a headless runtime, `PoseExtractor` falls back to Ultralytics `yolov8n-pose.pt`; keep that model file in the repo root or allow Ultralytics to download it on first use.
 
 ### Env files (never commit)
 - `MVP/web/.env.local` — Next.js side: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `R2_*`.
@@ -76,7 +75,7 @@ RLS policies (see `supabase/migrations/001_initial.sql`) only grant `select` on 
 ### Technique analysis pipeline (`technique-analysis/src/technique_analysis/`)
 Entry point: `free_ski.pipeline.orchestrator.TechniqueAnalysisRunner.run(video_path)`. Stages, in order:
 1. `common.datasets.video_io.iter_frames` + `recommend_config` — frame loader with auto-downsampling.
-2. `common.pose.extractor.PoseExtractor` (MediaPipe) **or** `common.pose.vision_extractor.VisionPoseExtractor` (Apple Vision) — selected by `TechniqueRunConfig.pose_engine`.
+2. `common.pose.extractor.PoseExtractor` — MediaPipe first, with a portable YOLOv8 pose fallback when MediaPipe cannot initialize.
 3. `common.pose.smoother.LandmarkSmoother` + gap-filling — Kalman smoothing with confidence decay across short detection gaps.
 4. `common.metrics.frame_metrics.compute_frame_metrics` → per-frame angles/asymmetries → `compute_frame_score` adds composite `overall_score` + `movement_quality` label.
 5. `common.turns.segmenter.segment_turns` → turn boundaries → `compute_turn_quality` fills `quality_score`, `smoothness_score`, `peak_lateral_shift`, `amplitude` per turn. Tracking segments (`TrackingSegment`) demarcate continuous athlete epochs when the tracker re-acquires after gaps.

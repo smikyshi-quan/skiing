@@ -93,7 +93,7 @@ Python code spans `MVP/` and `technique-analysis/`, so the manifest lives at the
 
 Top-level dependencies declared in `pyproject.toml`:
 - Required: `opencv-python`, `mediapipe`, `numpy`, `ultralytics`, `supabase`, `python-dotenv`, `boto3`, `requests`, `scipy` *(new)*
-- Optional: `torch` *(used only for Apple MPS backend selection in `person_detector.py:166`; install path documented but not required for CPU/CUDA paths)*
+- Optional: `torch` *(only if needed by the local Ultralytics install/runtime; the plan does not depend on hardware-specific acceleration)*
 
 `uv.lock` is committed to the repo and is what Phase 0's tolerance assertions are pinned *against*. Updating any dependency requires re-running the harness and signing off on any snapshot diffs — same workflow as a Phase 3 or Phase 5 change.
 
@@ -696,7 +696,7 @@ Numbers in this document are starting points. The harness sets final values:
 - **4-phase scoring**. Needs edge-change detection that's not reliable from monocular video. 3-phase is the honest derivable version.
 - **Multi-view stereo fusion** to fix MediaPipe z-axis noise. Not feasible for user-uploaded phone footage. Phase 2's "drop z" is the monocular-honest equivalent.
 - **Multi-class viewpoint classifier** (side-on / follow-cam / oblique). Separate research task; the current ankle-visibility heuristic is only strong enough to be wrapped into a binary `stance_measurable` signal, no more.
-- **Replacing MediaPipe entirely**. The Apple Vision backend (`--pose-engine vision`) already exists; architecture supports adding more.
+- **Replacing MediaPipe entirely**. Keep one portable MediaPipe pose path for this work; alternate hardware-specific acceleration is deliberately out of scope.
 
 ---
 
