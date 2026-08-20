@@ -63,6 +63,9 @@ IMPORTANT GUIDELINES:
 - Treat reliability fields as first-class evidence. If score_reliability is
   limited or insufficient, include an explicit caveat and avoid precise
   degree-by-degree prescriptions that the data cannot support.
+- Do NOT state an overall score for the run. No number is provided and the
+  app displays its own score elsewhere; quoting or estimating one will
+  contradict what the skier sees. Describe quality in words instead.
 - Keep the tone encouraging but honest.
 - Do not mention deterministic rules or imply the feedback came from video
   inspection. It came from structured metrics only.
@@ -356,17 +359,15 @@ def build_metrics_judge_input(summary: dict) -> dict:
     """Return the compact structured payload sent to the metrics-only LLM judge."""
     quality = _normalized_quality_report(summary)
     turns = [turn for turn in summary.get("turns", []) if isinstance(turn, dict)]
-    score = _number(summary.get("score"), 0)
-    if score is None:
-        score = _compute_summary_score(summary)
     video_metadata = summary.get("video_metadata") if isinstance(summary.get("video_metadata"), dict) else {}
     segments = summary.get("segments") if isinstance(summary.get("segments"), list) else []
 
     return {
         "judge_input_version": "improvements_v2_metrics_only",
         "run": {
-            "score": score,
-            "score_label": _score_label(score),
+            # The overall score shown to the skier is computed by the web app
+            # (lib/analysis-summary.ts). Deliberately omitted here so the judge
+            # cannot quote a second, divergent number back at the user.
             "score_reliability": quality["score_reliability"],
             "score_counts_for_progress": quality["score_counts_for_progress"],
             "turns_detected": len(turns),

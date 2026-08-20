@@ -65,16 +65,6 @@ function signedDownloads(artifacts: ArtifactWithUrl[]) {
   ].filter((e): e is { label: string; artifact: ArtifactWithUrl } => Boolean(e.artifact?.url))
 }
 
-function levelBadgeClass(label: string) {
-  switch (label) {
-    case 'Focus': return 'level-badge level-badge--focus'
-    case 'Building': return 'level-badge level-badge--building'
-    case 'Good': return 'level-badge level-badge--good'
-    case 'Dialed': return 'level-badge level-badge--dialed'
-    default: return 'level-badge level-badge--building'
-  }
-}
-
 function confidenceMeta(
   reliability: RecapReliability,
   reliabilityMessage: ReturnType<typeof buildReliabilityMessage> | null,
@@ -106,25 +96,6 @@ function confidenceMeta(
     background: 'var(--success-dim)',
     helper: localized.helper,
   }
-}
-
-function coachingHeadline(
-  job: Job,
-  aiCoaching: AiCoaching | null,
-  lang: 'en' | 'zh',
-) {
-  if (isJudgeUnavailable(aiCoaching)) {
-    return lang === 'zh' ? 'LLM 评审暂不可用。' : 'LLM judge unavailable.'
-  }
-  if (aiCoaching?.coaching_points?.[0]?.title) return aiCoaching.coaching_points[0].title
-  if (aiCoaching?.coach_summary) return aiCoaching.coach_summary
-  if (job.status === 'done') return lang === 'zh' ? '你的滑行复盘已经准备好了。' : 'Your run recap is ready.'
-  if (job.status === 'error') {
-    return lang === 'zh'
-      ? '这趟滑行没有顺利完成分析。通常换一段更清晰、只包含一名滑雪者的视频就能恢复正常。'
-      : 'This run did not complete. A cleaner single-athlete clip usually gets the recap back on track.'
-  }
-  return lang === 'zh' ? '我们正在完成这趟滑行的 LLM 评审反馈。' : 'We are finishing the LLM judge feedback for this run.'
 }
 
 function metricDotColor(value: number, threshold: number): string {
@@ -287,9 +258,15 @@ export default function JobDetailPage() {
   const judgeUnavailable = isJudgeUnavailable(aiCoaching)
   const showJudgeUnavailable = job.status === 'done' && (!aiCoaching || judgeUnavailable)
   const currentCountsForProgress = summary ? scoreCountsForProgress(summary) : true
-  const headline = coachingHeadline(job, aiCoaching, lang)
   const score = job.score ?? dashboard?.overview.overallScore ?? null
   const level = score != null ? scoreLabel(score) : null
+  // Hero headline is the qualitative level for the score beside it. The judge's
+  // top coaching point is not used here — it already leads the 复盘 section.
+  const heroTitle = level
+    ? reliability !== 'reliable'
+      ? `${translateKnownText(level, lang)}${lang === 'zh' ? '（参考）' : ' (tentative)'}`
+      : translateKnownText(level, lang)
+    : dict.job.reviewMovement
   const scoreDelta = score != null && previousScore != null && currentCountsForProgress ? score - previousScore : null
   const displayName = getJobDisplayName(job)
   const userNote = getJobUserNote(job)
@@ -347,62 +324,57 @@ export default function JobDetailPage() {
 
               {/* Score + headline row */}
               <div className="flex items-start gap-5">
-                {score != null ? (
-                  <div className="score-ring shrink-0" style={{ width: '8.8rem', height: '8.8rem' }}>
-                    <div className="score-ring-glow" />
-                    <svg width="140" height="140" viewBox="0 0 140 140">
-                      <circle cx="70" cy="70" r="54" fill="none" stroke="rgba(17,17,17,0.08)" strokeWidth="7" />
-                      <circle
-                        cx="70" cy="70" r="54"
-                        fill="none"
-                        stroke="url(#scoreGradDetail)"
-                        strokeWidth="7"
-                        strokeLinecap="round"
-                        strokeDasharray="339.29"
-                        strokeDashoffset={339.29 - (score / 100) * 339.29}
-                      />
-                      <defs>
-                        <linearGradient id="scoreGradDetail" x1="0" y1="0" x2="1" y2="1">
-                          <stop offset="0%" stopColor="#0084d4" />
-                          <stop offset="100%" stopColor="#c79a44" />
-                        </linearGradient>
-                      </defs>
-                    </svg>
-                    <div className="score-ring-label">
-                      <span className="font-extrabold tracking-tight" style={{ fontSize: '2.15rem', color: 'var(--ink-strong)' }}>
-                        {score}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    className="flex items-center justify-center rounded-full shrink-0"
-                    style={{ width: '8.8rem', height: '8.8rem', background: 'rgba(255,255,255,0.9)', border: '2px dashed rgba(17,17,17,0.12)' }}
-                  >
-                    <div className="text-center px-2">
-                      <p className="text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>{dict.job.noScore}</p>
-                      <p className="mt-1 text-xs" style={{ color: 'var(--ink-muted)' }}>{dict.job.forThisClip}</p>
-                    </div>
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
+                <div className="shrink-0">
                   <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: 'var(--ink-muted)' }}>
                     {dict.job.currentScore}
                   </p>
+                  {score != null ? (
+                    <div className="score-ring mt-2" style={{ width: '8.8rem', height: '8.8rem' }}>
+                      <div className="score-ring-glow" />
+                      <svg width="140" height="140" viewBox="0 0 140 140">
+                        <circle cx="70" cy="70" r="54" fill="none" stroke="rgba(17,17,17,0.08)" strokeWidth="7" />
+                        <circle
+                          cx="70" cy="70" r="54"
+                          fill="none"
+                          stroke="url(#scoreGradDetail)"
+                          strokeWidth="7"
+                          strokeLinecap="round"
+                          strokeDasharray="339.29"
+                          strokeDashoffset={339.29 - (score / 100) * 339.29}
+                        />
+                        <defs>
+                          <linearGradient id="scoreGradDetail" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stopColor="#0084d4" />
+                            <stop offset="100%" stopColor="#c79a44" />
+                          </linearGradient>
+                        </defs>
+                      </svg>
+                      <div className="score-ring-label">
+                        <span className="font-extrabold tracking-tight" style={{ fontSize: '2.15rem', color: 'var(--ink-strong)' }}>
+                          {score}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      className="mt-2 flex items-center justify-center rounded-full"
+                      style={{ width: '8.8rem', height: '8.8rem', background: 'rgba(255,255,255,0.9)', border: '2px dashed rgba(17,17,17,0.12)' }}
+                    >
+                      <div className="text-center px-2">
+                        <p className="text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>{dict.job.noScore}</p>
+                        <p className="mt-1 text-xs" style={{ color: 'var(--ink-muted)' }}>{dict.job.forThisClip}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
                   <h1 style={{ fontSize: 'clamp(1.9rem, 3.6vw, 3rem)', fontWeight: 800, letterSpacing: '-0.05em', lineHeight: 1.05, color: 'var(--ink-strong)' }}>
-                    {score != null ? headline : dict.job.reviewMovement}
+                    {heroTitle}
                   </h1>
                   <p className="mt-3 text-sm leading-6" style={{ color: 'var(--ink-base)', maxWidth: '40rem' }}>
                     {confidence.helper}
                   </p>
                   <div className="mt-3 flex items-center gap-2 flex-wrap">
-                    {level && (
-                      <span className={levelBadgeClass(level)}>
-                        {reliability !== 'reliable'
-                          ? `${translateKnownText(level, lang)}${lang === 'zh' ? '（参考）' : ' (tentative)'}`
-                          : translateKnownText(level, lang)}
-                      </span>
-                    )}
                     {scoreDelta != null && (
                       <span
                         className="text-xs font-bold px-2 py-0.5 rounded-full"
