@@ -30,16 +30,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   movement: 'Movement', edging: 'Edging', rhythm: 'Rhythm', balance: 'Balance', general: 'General',
 }
 
-function levelBadgeClass(label: string) {
-  switch (label) {
-    case 'Focus': return 'level-badge level-badge--focus'
-    case 'Building': return 'level-badge level-badge--building'
-    case 'Good': return 'level-badge level-badge--good'
-    case 'Dialed': return 'level-badge level-badge--dialed'
-    default: return 'level-badge level-badge--building'
-  }
-}
-
 function metricDotColor(value: number, threshold: number): string {
   return value >= threshold ? 'var(--accent)' : 'var(--gold)'
 }
@@ -52,7 +42,9 @@ export default function SampleAnalysisPage() {
   const [showAllTips, setShowAllTips] = useState(false)
   const sampleCoaching = getSampleCoaching(lang)
 
-  const headline = sampleCoaching.coaching_points[0]?.title ?? sampleCoaching.coach_summary
+  // Headline mirrors the recap page: the qualitative level, not the judge's
+  // top coaching point (that already leads the coaching section below).
+  const headline = translateKnownText(level, lang)
 
   return (
     <>
@@ -110,7 +102,6 @@ export default function SampleAnalysisPage() {
                     {headline}
                   </h1>
                   <div className="mt-2 flex items-center gap-2 flex-wrap">
-                    <span className={levelBadgeClass(level)}>{translateKnownText(level, lang)}</span>
                     <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
                       {scoreContextForLang(score, lang)}
                     </span>
