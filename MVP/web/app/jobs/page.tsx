@@ -3,7 +3,8 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Job } from '@/lib/types'
 import { groupBySeason } from '@/lib/seasons'
-import { backfillMissingScores, loadPreviewUrlsForJobIds, resolveJobPresentation } from '@/lib/server-job-data'
+import { scoreCountsForProgress } from '@/lib/analysis-summary'
+import { backfillMissingScores, loadPreviewUrlsForJobIds, loadSummariesForJobIds, resolveJobPresentation } from '@/lib/server-job-data'
 import { getJobDisplayName, getJobUserNote, getJobOriginalFilename, getJobSearchText } from '@/lib/job-ui'
 import { RunMetadataEditor } from '@/components/run-metadata-editor'
 import { ArchiveRunsClient, type ArchiveRunItem } from '@/components/archive-runs-client'
@@ -38,8 +39,10 @@ export default async function ArchivePage({
 
   const seasonGroups = groupBySeason(runs)
   const scoredRuns = completedRuns.filter((job): job is Job & { score: number } => job.score != null)
-  const avgScore = scoredRuns.length
-    ? Math.round(scoredRuns.reduce((sum, job) => sum + job.score, 0) / scoredRuns.length)
+  const summaryByJob = await loadSummariesForJobIds(service, completedRuns.map((job) => job.id))
+  const progressScoredRuns = scoredRuns.filter((job) => scoreCountsForProgress(summaryByJob.get(job.id)))
+  const avgScore = progressScoredRuns.length
+    ? Math.round(progressScoredRuns.reduce((sum, job) => sum + job.score, 0) / progressScoredRuns.length)
     : null
   const previewUrlByJob = await loadPreviewUrlsForJobIds(service, runs.map((run) => run.id))
   const initialEditJobId =
@@ -74,6 +77,7 @@ export default async function ArchivePage({
       userNote: getJobUserNote(job),
       subtitle: `${formatDate(date, lang, { dateStyle: 'medium' })}${lang === 'en' ? ` at ${formatDate(date, lang, { hour: '2-digit', minute: '2-digit' })}` : ` ${formatDate(date, lang, { hour: '2-digit', minute: '2-digit' })}`}${sessionType ? ` · ${sessionType}` : ''}`,
       score: job.score,
+      scoreCountsForProgress: scoreCountsForProgress(summaryByJob.get(job.id)),
       previewUrl: previewUrlByJob.get(job.id) ?? null,
       sessionType,
       searchText: getJobSearchText(job),

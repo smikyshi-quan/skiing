@@ -18,7 +18,6 @@ Pipeline:
 from __future__ import annotations
 
 import math
-import platform
 
 import numpy as np
 
@@ -161,21 +160,7 @@ class PersonDetector:
                 print(f"[pose] YOLO device: {self._device}")
 
     def _select_device(self) -> str | None:
-        """Prefer Apple MPS on Apple Silicon when the runtime exposes it."""
-        try:
-            import torch
-        except Exception:
-            return None
-
-        if platform.system() != "Darwin":
-            return None
-
-        try:
-            if torch.backends.mps.is_built() and torch.backends.mps.is_available():
-                return "mps"
-        except Exception:
-            return None
-
+        """Use Ultralytics' default device selection."""
         return None
 
     def _inference_kwargs(self) -> dict[str, str]:

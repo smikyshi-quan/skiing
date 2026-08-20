@@ -32,14 +32,6 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("video_path", type=Path, help="Path to the input video.")
-    p.add_argument(
-        "--pose-engine",
-        choices=("mediapipe", "vision"),
-        default="mediapipe",
-        help=(
-            "Pose backend. Use 'vision' on macOS 14+ to run on Apple Vision (often faster on Apple Silicon)."
-        ),
-    )
     p.add_argument("--max-fps", type=float, default=None,
                    help="Downsample to this FPS for pose analysis (None = auto).")
     p.add_argument("--max-dimension", type=int, default=None,
@@ -59,7 +51,6 @@ def main() -> int:
         return 1
 
     config = TechniqueRunConfig(
-        pose_engine=args.pose_engine,
         max_fps=args.max_fps,
         max_dimension=args.max_dimension,
         render_overlay=not args.no_overlay,
@@ -68,16 +59,28 @@ def main() -> int:
     summary = TechniqueAnalysisRunner(config=config).run(video_path)
 
     # Write a compact local summary for the worker to introspect without
-    # re-parsing the full pipeline output.
+    # re-parsing the full pipeline output. The worker hands these fields
+    # straight to the metrics-only LLM judge (see CODEX_GOAL.md item 5),
+    # so the new reliability contract is included here.
+    quality_block = {
+        "overall_pose_confidence_mean": round(summary.quality.overall_pose_confidence_mean, 3),
+        "low_confidence_fraction": round(summary.quality.low_confidence_fraction, 3),
+        "warnings": summary.quality.warnings,
+        # Improvements V2 — Tier 1 public reliability fields.
+        "score_reliability": summary.quality.score_reliability,
+        "score_counts_for_progress": summary.quality.score_counts_for_progress,
+        "quality_warnings": list(summary.quality.quality_warnings),
+        "stance_measurable": summary.quality.stance_measurable,
+        "stance_visibility_fraction": round(summary.quality.stance_visibility_fraction, 3),
+        "wedge_likely": summary.quality.wedge_likely,
+    }
     mvp_summary = {
         "video": str(video_path),
         "run_directory": summary.run_directory,
         "turns": len(summary.turns),
-        "quality": {
-            "overall_pose_confidence_mean": round(summary.quality.overall_pose_confidence_mean, 3),
-            "low_confidence_fraction": round(summary.quality.low_confidence_fraction, 3),
-            "warnings": summary.quality.warnings,
-        },
+        # Emit both `quality` (legacy) and `quality_report` (new contract key).
+        "quality": quality_block,
+        "quality_report": quality_block,
         "coaching_tips": [
             {"severity": t.severity, "title": t.title, "explanation": t.explanation}
             for t in summary.coaching_tips

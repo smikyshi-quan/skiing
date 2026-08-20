@@ -343,7 +343,6 @@ def _run_analysis(
     heartbeat: Callable[[], None] | None = None,
 ) -> tuple[Path, dict, dict | None]:
     """Invoke MVP/run.py and return (run_dir, mvp_summary_dict, full_analysis_summary_or_None)."""
-    pose_engine = job_config.get("pose_engine", "mediapipe")
     max_fps = job_config.get("max_fps", None)
     max_dimension = job_config.get("max_dimension", None)
     render_overlay = bool(job_config.get("render_overlay", True))
@@ -353,7 +352,6 @@ def _run_analysis(
         sys.executable,
         str(RUN_SCRIPT),
         str(local_video),
-        "--pose-engine", str(pose_engine),
     ]
     if max_fps is not None:
         cmd.extend(["--max-fps", str(max_fps)])
@@ -685,6 +683,27 @@ def _upload_artifacts(
 # Job processing
 
 
+def _judge_unavailable_payload(error: Exception, language: str) -> dict:
+    if language == "zh":
+        summary = "LLM 评审暂不可用。"
+        observation = "分析已成功完成，但本地 LLM 评审调用失败。这里不会显示规则生成的替代反馈。"
+    else:
+        summary = "LLM judge unavailable."
+        observation = (
+            "The analysis completed successfully, but the local LLM judge call failed. "
+            "No rule-generated fallback feedback is shown."
+        )
+
+    return {
+        "judge_status": "unavailable",
+        "judge_kind": "metrics_only_llm",
+        "judge_error": str(error)[:500],
+        "coach_summary": summary,
+        "coaching_points": [],
+        "additional_observations": [observation],
+    }
+
+
 def process_job(job: dict) -> None:
     job_id: str = job["id"]
     video_path_in_storage: str | None = job.get("video_object_path")
@@ -732,14 +751,14 @@ def process_job(job: dict) -> None:
             _write_heartbeat(job_id, config)
 
             if not full_summary:
-                raise RuntimeError("Detailed summary was not produced, so coach feedback could not be generated.")
+                raise RuntimeError("Detailed summary was not produced, so LLM judge feedback could not be generated.")
 
             coaching_path: Path | None = None
-            _set_progress(job_id, config, "Writing your coach feedback...", step=3, total=5, stage="Writing your coach feedback")
+            _set_progress(job_id, config, "Writing your LLM judge feedback...", step=3, total=5, stage="Writing your LLM judge feedback")
             try:
                 from lmstudio_coaching import generate_coaching
 
-                print(f"[{job_id[:8]}] Calling LM Studio for coaching feedback...")
+                print(f"[{job_id[:8]}] Calling LM Studio for metrics-only judge feedback...")
                 coaching_result = generate_coaching(
                     full_summary,
                     base_url=LMSTUDIO_BASE_URL,
@@ -750,12 +769,15 @@ def process_job(job: dict) -> None:
                 coaching_path = run_dir / "summary" / "ai_coaching.json"
                 coaching_path.parent.mkdir(parents=True, exist_ok=True)
                 coaching_path.write_text(json.dumps(coaching_result, indent=2))
-                print(f"[{job_id[:8]}] AI coaching ready")
+                print(f"[{job_id[:8]}] LLM judge feedback ready")
             except Exception as exc:
                 print(
-                    f"[{job_id[:8]}] WARN: AI coaching unavailable, continuing without it: {exc}",
+                    f"[{job_id[:8]}] WARN: LLM judge unavailable, continuing with explicit unavailable state: {exc}",
                     file=sys.stderr,
                 )
+                coaching_path = run_dir / "summary" / "ai_coaching.json"
+                coaching_path.parent.mkdir(parents=True, exist_ok=True)
+                coaching_path.write_text(json.dumps(_judge_unavailable_payload(exc, preferred_language), indent=2))
 
             _set_progress(job_id, config, f"Publishing your recap ({n_turns} turn(s) found)...", step=4, total=5, stage="Publishing your recap")
             print(f"[{job_id[:8]}] Uploading recap assets...")
