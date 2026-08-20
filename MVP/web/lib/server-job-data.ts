@@ -2,13 +2,19 @@ import 'server-only'
 
 import { createArtifactDownloadUrl, getDefaultR2ArtifactsBucket } from '@/lib/r2'
 import { createServiceClient } from '@/lib/supabase/server'
-import { buildTechniqueDashboard, type TechniqueRunSummary } from '@/lib/analysis-summary'
+import { buildTechniqueDashboard, scoreCountsForProgress, type AiCoaching, type TechniqueRunSummary } from '@/lib/analysis-summary'
 import type { Job } from '@/lib/types'
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
 interface SummaryArtifactRow {
   job_id: string
+  object_path: string
+}
+
+interface CoachingArtifactRow {
+  job_id: string
+  kind: string
   object_path: string
 }
 
@@ -296,6 +302,53 @@ export async function loadSummariesForJobIds(
   }))
 
   return summaryByJob
+}
+
+export async function loadAiCoachingForJobIds(
+  service: ServiceClient,
+  jobIds: string[],
+): Promise<Map<string, AiCoaching>> {
+  const coachingByJob = new Map<string, AiCoaching>()
+  if (!jobIds.length) return coachingByJob
+
+  const { data: artifacts } = await service
+    .from('artifacts')
+    .select('job_id, kind, object_path')
+    .in('job_id', jobIds)
+    .in('kind', ['ai_coaching', 'claude_coaching', 'gemini_coaching'])
+    .order('created_at', { ascending: false })
+
+  const artifactByJob = new Map<string, CoachingArtifactRow>()
+  for (const artifact of (artifacts ?? []) as CoachingArtifactRow[]) {
+    const current = artifactByJob.get(artifact.job_id)
+    if (!current || (current.kind !== 'ai_coaching' && artifact.kind === 'ai_coaching')) {
+      artifactByJob.set(artifact.job_id, artifact)
+    }
+  }
+
+  await Promise.all(Array.from(artifactByJob.values()).map(async (artifact) => {
+    const { data: file } = await service.storage
+      .from('artifacts')
+      .download(artifact.object_path)
+
+    if (!file) return
+
+    try {
+      coachingByJob.set(artifact.job_id, JSON.parse(await file.text()) as AiCoaching)
+    } catch {
+      // Ignore malformed optional judge artifacts; the UI will show unavailable.
+    }
+  }))
+
+  return coachingByJob
+}
+
+export function jobScoreCountsForProgress(
+  job: Pick<Job, 'score'>,
+  summary: TechniqueRunSummary | null | undefined,
+): boolean {
+  if (job.score == null) return true
+  return scoreCountsForProgress(summary)
 }
 
 export async function loadPreviewUrlsForJobIds(

@@ -2,8 +2,8 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import type { Job } from '@/lib/types'
-import { scoreLabel } from '@/lib/analysis-summary'
-import { backfillMissingScores, loadPreviewUrlsForJobIds, resolveJobPresentation } from '@/lib/server-job-data'
+import { scoreCountsForProgress, scoreLabel } from '@/lib/analysis-summary'
+import { backfillMissingScores, loadPreviewUrlsForJobIds, loadSummariesForJobIds, resolveJobPresentation } from '@/lib/server-job-data'
 import { getJobDisplayName, getJobUserNote, getJobOriginalFilename } from '@/lib/job-ui'
 import { ScoreTrendCard } from '@/components/score-trend-card'
 import { RunMetadataEditor } from '@/components/run-metadata-editor'
@@ -33,13 +33,17 @@ export default async function ProfilePage() {
   const completedRuns = runs.filter((job) => job.status === 'done')
   await backfillMissingScores(service, completedRuns)
   const scoredRuns = completedRuns.filter((job): job is Job & { score: number } => job.score != null)
-  const avgScore = scoredRuns.length
-    ? Math.round(scoredRuns.reduce((sum, job) => sum + job.score, 0) / scoredRuns.length)
+  const summaryByJob = await loadSummariesForJobIds(service, completedRuns.map((job) => job.id))
+  const progressScoredRuns = scoredRuns.filter((job) => scoreCountsForProgress(summaryByJob.get(job.id)))
+  const avgScore = progressScoredRuns.length
+    ? Math.round(progressScoredRuns.reduce((sum, job) => sum + job.score, 0) / progressScoredRuns.length)
     : null
-  const bestScore = scoredRuns.length ? Math.max(...scoredRuns.map((job) => job.score)) : null
+  const bestScore = progressScoredRuns.length ? Math.max(...progressScoredRuns.map((job) => job.score)) : null
   const latestCompleted = completedRuns[0] ?? null
-  const bestRun = scoredRuns.length
-    ? scoredRuns.reduce((best, run) => (best == null || run.score > best.score ? run : best), null as (Job & { score: number }) | null)
+  const latestCompletedExcluded = latestCompleted?.score != null
+    && !scoreCountsForProgress(summaryByJob.get(latestCompleted.id))
+  const bestRun = progressScoredRuns.length
+    ? progressScoredRuns.reduce((best, run) => (best == null || run.score > best.score ? run : best), null as (Job & { score: number }) | null)
     : null
 
   const displayName = user.email?.split('@')[0] ?? 'Athlete'
@@ -110,7 +114,7 @@ export default async function ProfilePage() {
 
       <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
         <ScoreTrendCard
-          runs={scoredRuns}
+          runs={progressScoredRuns}
           title={dict.profile.trendTitle}
           subtitle={dict.profile.trendSubtitle}
           lang={lang}
@@ -129,7 +133,9 @@ export default async function ProfilePage() {
               {latestCompleted && (
                 <div className="mt-2 space-y-3">
                   <p className="text-sm" style={{ color: 'var(--ink-soft)' }}>
-                    {latestCompleted.score != null
+                    {latestCompletedExcluded
+                      ? dict.profile.latestExcluded.replace('{score}', String(latestCompleted.score))
+                      : latestCompleted.score != null
                       ? dict.profile.latestScored.replace('{score}', String(latestCompleted.score))
                       : dict.profile.latestReview}
                   </p>
@@ -185,6 +191,7 @@ export default async function ProfilePage() {
               const displayNameForRun = getJobDisplayName(job)
               const originalFilename = getJobOriginalFilename(job)
               const userNote = getJobUserNote(job)
+              const excludedFromProgress = job.score != null && !scoreCountsForProgress(summaryByJob.get(job.id))
               return (
                 <li key={job.id}>
                   <div className="surface-card-muted flex items-center gap-4 px-4 py-4">
@@ -236,7 +243,9 @@ export default async function ProfilePage() {
                             {job.score}
                           </p>
                           <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-                            {translateKnownText(scoreLabel(job.score), lang)}
+                            {excludedFromProgress
+                              ? dict.profile.excludedFromProgress
+                              : translateKnownText(scoreLabel(job.score), lang)}
                           </p>
                         </div>
                       )}

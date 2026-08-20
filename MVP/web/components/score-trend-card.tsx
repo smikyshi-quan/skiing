@@ -31,14 +31,21 @@ export function ScoreTrendCard({
   subtitle = 'Your last 10 scored runs.',
   lang = 'en',
 }: {
-  runs: Array<Pick<Job, 'score' | 'created_at'>>
+  runs: Array<Pick<Job, 'score' | 'created_at'> & {
+    scoreCountsForProgress?: boolean
+    score_counts_for_progress?: boolean
+  }>
   title?: string
   subtitle?: string
   lang?: Lang
 }) {
   const dict = getDictionary(lang)
   const trendRuns = runs
-    .filter((run): run is Pick<Job, 'score' | 'created_at'> & { score: number } => run.score != null)
+    .filter((run): run is Pick<Job, 'score' | 'created_at'> & { score: number } => (
+      run.score != null
+      && run.scoreCountsForProgress !== false
+      && run.score_counts_for_progress !== false
+    ))
     .slice(0, 10)
     .reverse()
 

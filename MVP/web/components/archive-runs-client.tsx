@@ -26,6 +26,7 @@ export interface ArchiveRunItem {
   userNote?: string | null
   subtitle: string
   score: number | null
+  scoreCountsForProgress: boolean
   previewUrl: string | null
   sessionType: string | null
   searchText?: string
@@ -177,7 +178,7 @@ function ArchiveRunsClientBody({ runs, initialEditJobId }: { runs: ArchiveRunIte
       ) : (
         groups.map((group) => {
           const groupRuns = group.runs as ArchiveRunItem[]
-          const groupScored = groupRuns.filter((run): run is ArchiveRunItem & { score: number } => run.score != null)
+          const groupScored = groupRuns.filter((run): run is ArchiveRunItem & { score: number } => run.score != null && run.scoreCountsForProgress)
           const groupAvg = groupScored.length
             ? Math.round(groupScored.reduce((sum, run) => sum + run.score, 0) / groupScored.length)
             : null
@@ -219,6 +220,7 @@ function ArchiveRunsClientBody({ runs, initialEditJobId }: { runs: ArchiveRunIte
                 {groupRuns.map((run) => {
                   const statusStyle = toneStyles(run.statusTone)
                   const displayName = run.displayName ?? run.title ?? dict.archive.untitled
+                  const scoreExcluded = run.score != null && !run.scoreCountsForProgress
                   return (
                     <li key={run.id}>
                       <div
@@ -273,7 +275,9 @@ function ArchiveRunsClientBody({ runs, initialEditJobId }: { runs: ArchiveRunIte
                                 {run.score}
                               </p>
                               <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-                                {translateKnownText(scoreLabel(run.score), lang)}
+                                {scoreExcluded
+                                  ? dict.archive.excludedFromProgress
+                                  : translateKnownText(scoreLabel(run.score), lang)}
                               </p>
                             </div>
                           )}

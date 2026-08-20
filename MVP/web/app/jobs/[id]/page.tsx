@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { buildTechniqueDashboard, scoreLabel, computeReliability, buildReliabilityMessage, generateLimitations, type TechniqueRunSummary, type RecapReliability, type AiCoaching, type AiCoachingPoint } from '@/lib/analysis-summary'
+import { buildTechniqueDashboard, scoreLabel, computeReliability, buildReliabilityMessage, generateLimitations, isJudgeUnavailable, scoreCountsForProgress, type TechniqueRunSummary, type RecapReliability, type AiCoaching, type AiCoachingPoint } from '@/lib/analysis-summary'
 import { getDrill, localizeDrill } from '@/lib/drills'
 import type { ArtifactWithUrl, Job, JobStatus } from '@/lib/types'
 import { getJobDisplayName, getJobUserNote } from '@/lib/job-ui'
@@ -111,11 +111,10 @@ function confidenceMeta(
 function coachingHeadline(
   job: Job,
   aiCoaching: AiCoaching | null,
-  reliability: RecapReliability,
   lang: 'en' | 'zh',
 ) {
-  if (reliability === 'insufficient') {
-    return lang === 'zh' ? '这段视频的分析质量有限。' : 'Analysis quality is limited for this clip.'
+  if (isJudgeUnavailable(aiCoaching)) {
+    return lang === 'zh' ? 'LLM 评审暂不可用。' : 'LLM judge unavailable.'
   }
   if (aiCoaching?.coaching_points?.[0]?.title) return aiCoaching.coaching_points[0].title
   if (aiCoaching?.coach_summary) return aiCoaching.coach_summary
@@ -125,7 +124,7 @@ function coachingHeadline(
       ? '这趟滑行没有顺利完成分析。通常换一段更清晰、只包含一名滑雪者的视频就能恢复正常。'
       : 'This run did not complete. A cleaner single-athlete clip usually gets the recap back on track.'
   }
-  return lang === 'zh' ? '我们正在完成这趟滑行的教练反馈。' : 'We are finishing the coach feedback for this run.'
+  return lang === 'zh' ? '我们正在完成这趟滑行的 LLM 评审反馈。' : 'We are finishing the LLM judge feedback for this run.'
 }
 
 function metricDotColor(value: number, threshold: number): string {
@@ -285,10 +284,13 @@ export default function JobDetailPage() {
   const coolMomentPhotos = artifacts.filter((artifact) => artifact.kind === 'cool_moment_photo')
   const peakFrames = artifacts.filter((artifact) => artifact.kind === 'peak_pressure_frame' || artifact.kind === 'peak_pressure_frame_enhanced')
   const downloads = signedDownloads(artifacts)
-  const headline = coachingHeadline(job, aiCoaching, reliability, lang)
+  const judgeUnavailable = isJudgeUnavailable(aiCoaching)
+  const showJudgeUnavailable = job.status === 'done' && (!aiCoaching || judgeUnavailable)
+  const currentCountsForProgress = summary ? scoreCountsForProgress(summary) : true
+  const headline = coachingHeadline(job, aiCoaching, lang)
   const score = job.score ?? dashboard?.overview.overallScore ?? null
   const level = score != null ? scoreLabel(score) : null
-  const scoreDelta = score != null && previousScore != null ? score - previousScore : null
+  const scoreDelta = score != null && previousScore != null && currentCountsForProgress ? score - previousScore : null
   const displayName = getJobDisplayName(job)
   const userNote = getJobUserNote(job)
   const breadcrumbName = displayName
@@ -345,7 +347,7 @@ export default function JobDetailPage() {
 
               {/* Score + headline row */}
               <div className="flex items-start gap-5">
-                {score != null && reliability !== 'insufficient' && (
+                {score != null ? (
                   <div className="score-ring shrink-0" style={{ width: '8.8rem', height: '8.8rem' }}>
                     <div className="score-ring-glow" />
                     <svg width="140" height="140" viewBox="0 0 140 140">
@@ -372,8 +374,7 @@ export default function JobDetailPage() {
                       </span>
                     </div>
                   </div>
-                )}
-                {reliability === 'insufficient' && (
+                ) : (
                   <div
                     className="flex items-center justify-center rounded-full shrink-0"
                     style={{ width: '8.8rem', height: '8.8rem', background: 'rgba(255,255,255,0.9)', border: '2px dashed rgba(17,17,17,0.12)' }}
@@ -389,22 +390,20 @@ export default function JobDetailPage() {
                     {dict.job.currentScore}
                   </p>
                   <h1 style={{ fontSize: 'clamp(1.9rem, 3.6vw, 3rem)', fontWeight: 800, letterSpacing: '-0.05em', lineHeight: 1.05, color: 'var(--ink-strong)' }}>
-                    {reliability === 'insufficient'
-                      ? reliabilityUi.title
-                      : score != null ? headline : dict.job.reviewMovement}
+                    {score != null ? headline : dict.job.reviewMovement}
                   </h1>
                   <p className="mt-3 text-sm leading-6" style={{ color: 'var(--ink-base)', maxWidth: '40rem' }}>
                     {confidence.helper}
                   </p>
                   <div className="mt-3 flex items-center gap-2 flex-wrap">
-                    {level && reliability !== 'insufficient' && (
+                    {level && (
                       <span className={levelBadgeClass(level)}>
-                        {reliability === 'limited'
+                        {reliability !== 'reliable'
                           ? `${translateKnownText(level, lang)}${lang === 'zh' ? '（参考）' : ' (tentative)'}`
                           : translateKnownText(level, lang)}
                       </span>
                     )}
-                    {scoreDelta != null && reliability !== 'insufficient' && (
+                    {scoreDelta != null && (
                       <span
                         className="text-xs font-bold px-2 py-0.5 rounded-full"
                         style={{
@@ -415,9 +414,14 @@ export default function JobDetailPage() {
                         {scoreDelta >= 0 ? '+' : ''}{scoreDelta} {dict.job.vsPrev}
                       </span>
                     )}
-                    {score != null && reliability !== 'insufficient' && (
+                    {score != null && (
                       <span className="text-sm" style={{ color: 'var(--ink-soft)' }}>
                         {scoreContextForLang(score, lang)}
+                      </span>
+                    )}
+                    {score != null && !currentCountsForProgress && (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ color: 'var(--gold)', background: 'var(--gold-dim)' }}>
+                        {dict.job.excludedFromProgress}
                       </span>
                     )}
                   </div>
@@ -606,7 +610,7 @@ export default function JobDetailPage() {
             )}
 
             {/* ── Coach's Analysis ─────────────────────── */}
-            {aiCoaching ? (
+            {aiCoaching && !judgeUnavailable ? (
               <section className="surface-card p-6">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div>
@@ -691,6 +695,21 @@ export default function JobDetailPage() {
                   </div>
                 )}
               </section>
+            ) : showJudgeUnavailable ? (
+              <section className="surface-card p-6">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="section-label" style={{ color: 'var(--accent)' }}>{dict.job.coachAnalysis}</p>
+                    <h2 className="mt-2" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-strong)' }}>
+                      {dict.job.judgeUnavailableTitle}
+                    </h2>
+                  </div>
+                  <span className="eyebrow">{dict.job.aiCoach}</span>
+                </div>
+                <p className="mt-5 text-base leading-7" style={{ color: 'var(--ink-base)' }}>
+                  {dict.job.judgeUnavailableBody}
+                </p>
+              </section>
             ) : (
               <section className="surface-card p-6">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -711,7 +730,7 @@ export default function JobDetailPage() {
             )}
 
             {/* ── Recommended Practice (drill summary) ─── */}
-            {aiCoaching && (() => {
+            {aiCoaching && !judgeUnavailable && (() => {
               const recommendedDrills = aiCoaching.coaching_points
                 .map((p: AiCoachingPoint) => p.recommended_drill_id)
                 .filter((id): id is string => id != null)
@@ -1003,7 +1022,7 @@ export default function JobDetailPage() {
                 </div>
               </div>
 
-              {aiCoaching?.coach_summary ? (
+              {aiCoaching?.coach_summary && !judgeUnavailable ? (
                 <div className="mt-6 surface-card-muted p-4">
                   <p className="section-label">{dict.job.coachNote}</p>
                   <p className="mt-3 text-sm leading-6" style={{ color: 'var(--ink-base)' }}>

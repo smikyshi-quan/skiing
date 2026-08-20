@@ -1,6 +1,8 @@
 export interface TechniqueTurn {
   turn_idx: number
   side: string
+  start_s?: number
+  end_s?: number
   duration_s: number
   avg_knee_flexion_diff: number
   avg_stance_width_ratio: number
@@ -30,19 +32,56 @@ export interface TrackingSegment {
   is_primary: boolean
 }
 
+export type RecapReliability = 'reliable' | 'limited' | 'insufficient'
+
+export type KnownQualityWarningCode =
+  | 'low_pose_confidence'
+  | 'insufficient_skeleton_detection'
+  | 'stance_not_measurable'
+  | 'wedge_likely'
+  | 'short_clip'
+  | 'low_boundary_reliability'
+  | 'tracking_loss'
+  | 'follow_cam_degraded'
+
+export type QualityWarningCode = KnownQualityWarningCode | (string & {})
+
+export interface TechniqueQualityReport {
+  score_reliability?: RecapReliability | string
+  score_counts_for_progress?: boolean
+  quality_warnings?: QualityWarningCode[]
+  stance_measurable?: boolean
+  stance_visibility_fraction?: number
+  wedge_likely?: boolean
+  overall_pose_confidence_mean?: number
+  overall_pose_confidence_min?: number
+  low_confidence_fraction?: number
+  viewpoint_warning?: string | null
+  jitter_score_mean?: number
+  warnings?: string[]
+  resolved_max_fps?: number | null
+  resolved_max_dimension?: number | null
+}
+
+export interface NormalizedTechniqueQualityReport extends TechniqueQualityReport {
+  score_reliability: RecapReliability
+  score_counts_for_progress: boolean
+  quality_warnings: QualityWarningCode[]
+  stance_measurable: boolean
+  wedge_likely: boolean
+}
+
 export interface TechniqueRunSummary {
-  quality?: {
-    overall_pose_confidence_mean?: number
-    low_confidence_fraction?: number
-    warnings?: string[]
-  }
+  quality_report?: TechniqueQualityReport
+  quality?: TechniqueQualityReport
   coaching_tips?: CoachingTip[]
   turns?: TechniqueTurn[]
   segments?: TrackingSegment[]
 }
 
 // ── Recap reliability ───────────────────────────────────────
-export type RecapReliability = 'reliable' | 'limited' | 'insufficient'
+export const INSUFFICIENT_RELIABILITY_WARNING =
+  "This video's quality is too low for reliable skeleton detection, so the score may be misleading. Try a better angle, higher resolution, closer camera, steadier shot, and cleaner single-skier framing."
 
 export interface ReliabilityMessage {
   title: string
@@ -64,113 +103,80 @@ export function clipQualityLabel(reliability: RecapReliability): string {
   }
 }
 
-// Thresholds — gathered in one place for easy tuning
-const RELIABILITY_THRESHOLDS = {
-  insufficientConfidence: 0.42,
-  insufficientLowFraction: 0.5,
-  limitedConfidence: 0.58,
-  limitedLowFraction: 0.28,
-  insufficientPrimarySegmentShare: 0.55,
-  insufficientPrimaryTurnShare: 0.6,
-} as const
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
-function segmentCoverage(segments: TrackingSegment[]) {
-  if (!segments.length) {
-    return { hasMultipleSegments: false, primaryFrameShare: 1, primaryTurnShare: 1 }
-  }
+// Runs analysed before the reliability contract existed carry no
+// `score_reliability`. Treat those as 'reliable' so historical recaps and the
+// bundled sample aren't retroactively flagged; the pipeline sets the tier
+// explicitly for every run it produces now.
+function normalizeReliability(value: unknown): RecapReliability {
+  return value === 'reliable' || value === 'insufficient' || value === 'limited'
+    ? value
+    : 'reliable'
+}
 
-  const primary = segments.find((segment) => segment.is_primary)
-    ?? [...segments].sort((left, right) => right.n_confident_frames - left.n_confident_frames)[0]
-  const totalFrames = segments.reduce((sum, segment) => sum + Math.max(segment.n_confident_frames, 0), 0)
-  const totalTurns = segments.reduce((sum, segment) => sum + Math.max(segment.n_turns, 0), 0)
-  const primaryFrameShare = totalFrames > 0 ? primary.n_confident_frames / totalFrames : 1
-  const primaryTurnShare = totalTurns > 0 ? primary.n_turns / totalTurns : 1
+function normalizedQualitySource(summary: TechniqueRunSummary): TechniqueQualityReport {
+  const source = isRecord(summary.quality_report)
+    ? summary.quality_report
+    : isRecord(summary.quality)
+      ? summary.quality
+      : {}
+  return source as TechniqueQualityReport
+}
+
+export function getQualityReport(summary: TechniqueRunSummary): NormalizedTechniqueQualityReport {
+  const source = normalizedQualitySource(summary)
+  const scoreReliability = normalizeReliability(source.score_reliability)
+  const qualityWarnings = toArray<QualityWarningCode>(source.quality_warnings)
 
   return {
-    hasMultipleSegments: segments.length > 1,
-    primaryFrameShare,
-    primaryTurnShare,
+    ...source,
+    score_reliability: scoreReliability,
+    score_counts_for_progress: typeof source.score_counts_for_progress === 'boolean'
+      ? source.score_counts_for_progress
+      : scoreReliability !== 'insufficient',
+    quality_warnings: qualityWarnings,
+    stance_measurable: typeof source.stance_measurable === 'boolean' ? source.stance_measurable : true,
+    wedge_likely: source.wedge_likely === true,
   }
 }
 
 export function computeReliability(summary: TechniqueRunSummary): RecapReliability {
-  const warnings = toArray<string>(summary.quality?.warnings)
-  const segments = toArray<TrackingSegment>(summary.segments)
-  const confidence = summary.quality?.overall_pose_confidence_mean ?? 1
-  const lowFrac = summary.quality?.low_confidence_fraction ?? 0
+  return getQualityReport(summary).score_reliability
+}
 
-  const hasSceneCut = warnings.some((w) => /scene.?cut/i.test(w))
-  const { hasMultipleSegments, primaryFrameShare, primaryTurnShare } = segmentCoverage(segments)
-  const fragmentedTracking = hasMultipleSegments && (
-    primaryFrameShare < RELIABILITY_THRESHOLDS.insufficientPrimarySegmentShare ||
-    primaryTurnShare < RELIABILITY_THRESHOLDS.insufficientPrimaryTurnShare ||
-    segments.length > 2
-  )
+export function scoreCountsForProgress(summary: TechniqueRunSummary | null | undefined): boolean {
+  if (!summary) return true
+  return getQualityReport(summary).score_counts_for_progress !== false
+}
 
-  // Insufficient: genuinely unreliable tracking or very fragmented clips.
-  if (
-    fragmentedTracking ||
-    confidence < RELIABILITY_THRESHOLDS.insufficientConfidence ||
-    lowFrac > RELIABILITY_THRESHOLDS.insufficientLowFraction ||
-    (hasSceneCut && confidence < RELIABILITY_THRESHOLDS.limitedConfidence && lowFrac > RELIABILITY_THRESHOLDS.limitedLowFraction)
-  ) {
-    return 'insufficient'
-  }
-
-  // Limited: warning flags or slightly weaker capture, but still usable.
-  if (
-    warnings.length > 0 ||
-    hasMultipleSegments ||
-    confidence < RELIABILITY_THRESHOLDS.limitedConfidence ||
-    lowFrac > RELIABILITY_THRESHOLDS.limitedLowFraction
-  ) {
-    return 'limited'
-  }
-
-  return 'reliable'
+export function combinedQualityWarnings(summary: TechniqueRunSummary): string[] {
+  const qualityReport = getQualityReport(summary)
+  return [
+    ...toArray<string>(qualityReport.quality_warnings),
+    ...toArray<string>(qualityReport.warnings),
+  ]
 }
 
 export function buildReliabilityMessage(summary: TechniqueRunSummary): ReliabilityMessage {
   const reliability = computeReliability(summary)
-  const warnings = toArray<string>(summary.quality?.warnings)
-  const segments = toArray<TrackingSegment>(summary.segments)
-  const confidence = summary.quality?.overall_pose_confidence_mean ?? 1
-  const lowFrac = summary.quality?.low_confidence_fraction ?? 0
-  const { hasMultipleSegments, primaryFrameShare, primaryTurnShare } = segmentCoverage(segments)
-
-  const issues: string[] = []
-  if (hasMultipleSegments) issues.push('parts of the clip were split into separate tracked sections')
-  if (warnings.some((warning) => /scene.?cut/i.test(warning))) issues.push('we detected cuts or angle changes')
-  if (warnings.some((warning) => /occlu/i.test(warning))) issues.push('parts of the skier moved out of view')
-  if (warnings.some((warning) => /camera|angle|perspective/i.test(warning))) issues.push('the camera angle reduced measurement accuracy')
-  if (confidence < RELIABILITY_THRESHOLDS.limitedConfidence || lowFrac > RELIABILITY_THRESHOLDS.limitedLowFraction) {
-    issues.push('the skier was hard to follow cleanly for parts of the clip')
-  }
-  if (
-    hasMultipleSegments &&
-    (primaryFrameShare < RELIABILITY_THRESHOLDS.insufficientPrimarySegmentShare || primaryTurnShare < RELIABILITY_THRESHOLDS.insufficientPrimaryTurnShare)
-  ) {
-    issues.push('too much of the run fell outside the main tracked section')
-  }
-
-  const explanation = issues.length
-    ? `This review is limited because ${issues.slice(0, 2).join(' and ')}.`
-    : 'This review is limited because the capture quality made the measurements less reliable.'
 
   if (reliability === 'insufficient') {
     return {
-      title: 'Score unavailable for this clip',
-      explanation,
-      nextStep: 'Try one continuous run with a steady side or behind angle and keep one skier clearly in frame the whole time.',
-      hideScoreReason: 'We hid the score because this clip would produce a misleading number.',
+      title: 'Score may be misleading',
+      explanation: INSUFFICIENT_RELIABILITY_WARNING,
+      nextStep: 'The score is still shown for transparency, but it is excluded from progress trends by default.',
+      hideScoreReason: 'The score is visible, but this clip is not reliable enough to count toward progress.',
     }
   }
 
   if (reliability === 'limited') {
     return {
       title: 'Review with caution',
-      explanation,
-      nextStep: 'Use this feedback as directional guidance, then re-record a cleaner single-run clip for a stronger read.',
+      explanation: 'Some measurements are less certain for this clip, so treat the score and feedback as directional rather than exact.',
+      nextStep: 'This score counts for progress unless the quality report explicitly excludes it.',
       hideScoreReason: 'The score is still visible, but the capture quality makes it less certain than usual.',
     }
   }
@@ -238,9 +244,16 @@ export interface AiCoachingPoint {
 }
 
 export interface AiCoaching {
+  judge_status?: 'available' | 'unavailable'
+  judge_kind?: 'metrics_only_llm' | string
+  judge_error?: string
   coach_summary: string
   coaching_points: AiCoachingPoint[]
   additional_observations: string[]
+}
+
+export function isJudgeUnavailable(aiCoaching: AiCoaching | null | undefined): boolean {
+  return aiCoaching?.judge_status === 'unavailable'
 }
 
 // ── Model limitations ────────────────────────────────────
@@ -251,10 +264,18 @@ export interface ModelLimitation {
 
 export function generateLimitations(summary: TechniqueRunSummary): ModelLimitation[] {
   const limitations: ModelLimitation[] = []
-  const confidence = summary.quality?.overall_pose_confidence_mean ?? 1
-  const lowFrac = summary.quality?.low_confidence_fraction ?? 0
-  const warnings = (summary.quality?.warnings ?? []) as string[]
+  const qualityReport = getQualityReport(summary)
+  const confidence = qualityReport.overall_pose_confidence_mean ?? 1
+  const lowFrac = qualityReport.low_confidence_fraction ?? 0
+  const warnings = combinedQualityWarnings(summary)
   const segments = summary.segments ?? []
+
+  if (qualityReport.score_reliability === 'insufficient') {
+    limitations.push({
+      title: 'Score may be misleading',
+      explanation: INSUFFICIENT_RELIABILITY_WARNING,
+    })
+  }
 
   if (confidence < 0.70) {
     limitations.push({
@@ -295,6 +316,34 @@ export function generateLimitations(summary: TechniqueRunSummary): ModelLimitati
     limitations.push({
       title: 'Cuts interrupted the run',
       explanation: 'A single uninterrupted clip works best. Edits or transitions make the recap less consistent.',
+    })
+  }
+
+  if (qualityReport.stance_measurable === false || warnings.includes('stance_not_measurable')) {
+    limitations.push({
+      title: 'Stance metrics are unreliable',
+      explanation: 'The feet were not clearly visible for enough of the clip, so stance-width and ski-separation metrics are less dependable.',
+    })
+  }
+
+  if (qualityReport.wedge_likely || warnings.includes('wedge_likely')) {
+    limitations.push({
+      title: 'Wedge skiing may reduce metric reliability',
+      explanation: 'This video appears to include wedge or snowplow skiing, so carved-turn edge and boundary metrics may be less reliable.',
+    })
+  }
+
+  if (warnings.includes('low_boundary_reliability')) {
+    limitations.push({
+      title: 'Turn boundaries need caution',
+      explanation: 'Some turn boundaries were flagged as lower reliability, so per-turn comparisons may need manual review.',
+    })
+  }
+
+  if (warnings.includes('follow_cam_degraded')) {
+    limitations.push({
+      title: 'Follow-cam angle reduced measurement accuracy',
+      explanation: 'A following camera angle makes stance and lateral movement harder to measure from a single video.',
     })
   }
 
@@ -398,6 +447,7 @@ function railPercent(score: number) {
 }
 
 export function buildTechniqueDashboard(summary: TechniqueRunSummary): TechniqueDashboard {
+  const qualityReport = getQualityReport(summary)
   const turns = toArray<TechniqueTurn>(summary.turns)
   const qualityScores = turns.map((turn) => turn.quality_score).filter((value) => Number.isFinite(value))
   const smoothnessScores = turns
@@ -418,7 +468,7 @@ export function buildTechniqueDashboard(summary: TechniqueRunSummary): Technique
   const kneeAsymmetry = round(mean(asymmetry))
   const leanAngle = round(mean(leanAngles))
   const quietnessMean = mean(quietness)
-  const poseConfidence = round((summary.quality?.overall_pose_confidence_mean ?? 0) * 100, 0)
+  const poseConfidence = round((qualityReport.overall_pose_confidence_mean ?? 0) * 100, 0)
   const comShiftMean = round(mean(comShift), 2)
   const durationDrift = round(stddev(durations), 2)
   const bestTurnScore = round(Math.max(...qualityScores, 0), 0)
@@ -588,6 +638,6 @@ export function buildTechniqueDashboard(summary: TechniqueRunSummary): Technique
     focusCards,
     allTips,
     turnHighlights,
-    warnings: toArray<string>(summary.quality?.warnings),
+    warnings: combinedQualityWarnings(summary),
   }
 }

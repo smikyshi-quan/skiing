@@ -4,7 +4,6 @@
   "video_path": "/Users/quan/Documents/Adobe/Premiere Pro/26.0/sample_video.mp4",
   "run_directory": "/Users/quan/Documents/personal/Stanford application project/technique-analysis/artifacts/runs/20260322_184745_sample_video",
   "config": {
-    "pose_engine": "mediapipe",
     "max_fps": null,
     "max_dimension": null,
     "render_overlay": true,

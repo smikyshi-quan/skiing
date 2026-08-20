@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { type TechniqueRunSummary, type AiCoaching } from '@/lib/analysis-summary'
+import { scoreCountsForProgress, type TechniqueRunSummary, type AiCoaching } from '@/lib/analysis-summary'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { createArtifactDownloadUrl, getDefaultR2ArtifactsBucket } from '@/lib/r2'
 import {
   computeSummaryScore,
   jobHasUpload,
   jobIsRetryable,
+  loadSummariesForJobIds,
   loadSummaryFromObjectPath,
   resolveJobPresentation,
 } from '@/lib/server-job-data'
@@ -180,16 +181,24 @@ export async function GET(
   if (job.status === 'done') {
     const { data: prevJobs } = await service
       .from('jobs')
-      .select('score')
+      .select('id, score')
       .eq('user_id', user.id)
       .eq('status', 'done')
       .lt('created_at', job.created_at)
       .not('score', 'is', null)
       .order('created_at', { ascending: false })
-      .limit(1)
+      .limit(20)
 
-    if (prevJobs?.length && prevJobs[0].score != null) {
-      previousScore = prevJobs[0].score
+    const previousRuns = (prevJobs ?? []) as Array<{ id: string; score: number | null }>
+    const previousSummaryByJob = await loadSummariesForJobIds(service, previousRuns.map((prevJob) => prevJob.id))
+    const previousProgressRun = previousRuns.find((prevJob) => {
+      if (prevJob.score == null) return false
+      const previousSummary = previousSummaryByJob.get(prevJob.id)
+      return scoreCountsForProgress(previousSummary)
+    })
+
+    if (previousProgressRun?.score != null) {
+      previousScore = previousProgressRun.score
     }
   }
 
