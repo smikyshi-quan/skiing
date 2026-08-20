@@ -22,7 +22,6 @@ def _jsonable(value: Any) -> Any:
 
 @dataclass(slots=True)
 class TechniqueRunConfig:
-    pose_engine: str = "mediapipe"
     max_fps: float | None = None
     max_dimension: int | None = None  # None = auto-detect from video resolution
     render_overlay: bool = True
@@ -186,6 +185,52 @@ class QualityReport:
     warnings: list[str]
     resolved_max_fps: float | None = None
     resolved_max_dimension: int | None = None
+    # Improvements V2 — Tier 1 public reliability contract.
+    # See communication/README.md and communication/backend_contract.md.
+    # Allowed score_reliability values: 'reliable' | 'limited' | 'insufficient'.
+    score_reliability: str = "limited"
+    score_counts_for_progress: bool = True
+    quality_warnings: list[str] = field(default_factory=list)
+    stance_measurable: bool = True
+    stance_visibility_fraction: float = 1.0
+    wedge_likely: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        return _jsonable(self)
+
+
+@dataclass(slots=True)
+class DiagnosticsBundle:
+    """Tier 2 internal-only diagnostic fields.
+
+    Lives on TechniqueRunSummary.diagnostics. Serialized into summary.json under
+    the `diagnostics` key, but no public UI consumer is expected to read these.
+
+    Moving a field out of this bundle and onto a public contract object is a
+    deliberate, code-review-visible change — see metrics_and_coaching_plan.md
+    "Cross-language contract changes".
+
+    All fields are populated incrementally as the Improvements V2 phases land
+    (Phase 1 timestamp_*, Phase 3 nyquist_violation / filter_cutoffs_applied,
+    Phase 5 event_mapping / boundary_reliability_by_turn / refinement counts).
+    They are declared up front so the schema is stable across phases.
+    """
+    # Phase 1 — PTS-aware iterator diagnostics (populated when implemented).
+    timestamp_source: str | None = None      # 'pts' | 'frame_idx'
+    timestamp_warning: str | None = None
+    analysis_fs: float | None = None
+    end_timestamp_s: float | None = None
+
+    # Phase 3 — filter diagnostics.
+    nyquist_violation: list[str] = field(default_factory=list)
+    filter_cutoffs_applied: dict[str, float] = field(default_factory=dict)
+    per_segment_low_confidence_fraction: list[float] = field(default_factory=list)
+
+    # Phase 5 — segmenter rewrite diagnostics.
+    event_mapping: str | None = None
+    boundary_reliability_by_turn: dict[str, str] = field(default_factory=dict)
+    stage_2_refinement_counts: dict[str, int] = field(default_factory=dict)
+    rejected_candidates: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return _jsonable(self)
@@ -207,13 +252,21 @@ class TechniqueRunSummary:
     # Tracking segments — one entry per detected athlete epoch.
     # Empty list means the whole video is treated as one segment (single athlete).
     segments: list[TrackingSegment] = field(default_factory=list)
+    # Improvements V2 — Tier 2 internal diagnostics bundle.
+    diagnostics: DiagnosticsBundle = field(default_factory=DiagnosticsBundle)
 
     def as_dict(self) -> dict[str, Any]:
         payload = _jsonable(self)
         payload["config"] = self.config.as_dict()
         payload["video_metadata"] = self.video_metadata.as_dict()
-        payload["quality"] = self.quality.as_dict()
+        quality_dict = self.quality.as_dict()
+        # Improvements V2 contract: web/server expects `quality_report` (per
+        # communication/README.md and CODEX_GOAL.md). Emit both keys with the
+        # same payload so legacy readers of `quality` still parse.
+        payload["quality"] = quality_dict
+        payload["quality_report"] = quality_dict
         payload["turns"] = [t.as_dict() for t in self.turns]
         payload["coaching_tips"] = [c.as_dict() for c in self.coaching_tips]
         payload["segments"] = [s.as_dict() for s in self.segments]
+        payload["diagnostics"] = self.diagnostics.as_dict()
         return payload

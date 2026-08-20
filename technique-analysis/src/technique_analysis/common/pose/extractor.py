@@ -17,6 +17,27 @@ from technique_analysis.common.pose import rotation_recovery
 # Key joint indices for confidence scoring
 _CONFIDENCE_JOINTS = [11, 12, 23, 24, 25, 26, 27, 28]
 
+# COCO-17 keypoint index -> MediaPipe-33 landmark index.
+_COCO_TO_MEDIAPIPE = {
+    0: 0,    # nose
+    1: 2,    # left eye -> MediaPipe left eye
+    2: 5,    # right eye -> MediaPipe right eye
+    3: 7,    # left ear
+    4: 8,    # right ear
+    5: 11,   # left shoulder
+    6: 12,   # right shoulder
+    7: 13,   # left elbow
+    8: 14,   # right elbow
+    9: 15,   # left wrist
+    10: 16,  # right wrist
+    11: 23,  # left hip
+    12: 24,  # right hip
+    13: 25,  # left knee
+    14: 26,  # right knee
+    15: 27,  # left ankle
+    16: 28,  # right ankle
+}
+
 
 # ---------------------------------------------------------------------------
 # Scene cut detector
@@ -87,6 +108,7 @@ _FULL_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/"
     "pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task"
 )
+_YOLO_POSE_MODEL = "yolov8n-pose.pt"
 
 
 def _find_or_download_model() -> Path:
@@ -119,6 +141,24 @@ def _find_or_download_model() -> Path:
         "No pose model found. Download pose_landmarker_full.task from:\n"
         f"  {_FULL_MODEL_URL}"
     )
+
+
+def _find_yolo_pose_model() -> str:
+    """Return a local YOLO pose model path when present, else model name.
+
+    Passing the bare model name lets Ultralytics download it on machines with
+    network access. Local path lookup keeps worker behavior stable regardless
+    of the process working directory.
+    """
+    repo_root = Path(__file__).resolve().parents[5]
+    for candidate in (
+        Path.cwd() / _YOLO_POSE_MODEL,
+        repo_root / _YOLO_POSE_MODEL,
+        repo_root / "MVP" / _YOLO_POSE_MODEL,
+    ):
+        if candidate.exists():
+            return str(candidate)
+    return _YOLO_POSE_MODEL
 
 
 def _transform_landmarks(
@@ -176,7 +216,11 @@ class PoseExtractor:
     def __init__(self, min_visibility: float = 0.5) -> None:
         self._min_visibility = min_visibility
         self._landmarker: Any = None
+        self._yolo_pose_model: Any = None
+        self._yolo_pose_ok = False
+        self._yolo_pose_load_attempted = False
         self._mp: Any = None
+        self._pose_unavailable_reason: str | None = None
         self._detector = PersonDetector()  # owns ByteTrack locking internally
         self._pose_tracker = PersonTracker()     # fallback: tracks hip midpoints
         self._last_timestamp_s: float | None = None
@@ -210,7 +254,10 @@ class PoseExtractor:
         model_path = _find_or_download_model()
         print(f"[pose] Model: {model_path.name}")
 
-        base_options = mp_python.BaseOptions(model_asset_path=str(model_path))
+        base_options = mp_python.BaseOptions(
+            model_asset_path=str(model_path),
+            delegate=mp_python.BaseOptions.Delegate.CPU,
+        )
         # With two-step cropping we only need one pose per crop
         options = mp_vision.PoseLandmarkerOptions(
             base_options=base_options,
@@ -219,8 +266,17 @@ class PoseExtractor:
             min_pose_presence_confidence=0.25,
             min_tracking_confidence=0.25,
         )
-        self._landmarker = mp_vision.PoseLandmarker.create_from_options(options)
         self._mp = mp
+        try:
+            self._landmarker = mp_vision.PoseLandmarker.create_from_options(options)
+        except RuntimeError as exc:
+            self._pose_unavailable_reason = str(exc)
+            self._landmarker = None
+            print(
+                "[pose] MediaPipe pose unavailable; continuing with "
+                "YOLO pose fallback."
+            )
+            self._ensure_yolo_pose_loaded()
 
         # Warm up YOLOv8 (triggers model download once, if needed)
         try:
@@ -236,6 +292,23 @@ class PoseExtractor:
         if self._landmarker is not None:
             self._landmarker.close()
             self._landmarker = None
+
+    def _ensure_yolo_pose_loaded(self) -> None:
+        """Load a portable YOLO pose fallback when MediaPipe cannot run."""
+        if self._yolo_pose_model is not None or self._yolo_pose_ok:
+            return
+        if self._yolo_pose_load_attempted:
+            return
+        self._yolo_pose_load_attempted = True
+        try:
+            from ultralytics import YOLO
+            self._yolo_pose_model = YOLO(_find_yolo_pose_model())
+            self._yolo_pose_ok = True
+            print("[pose] Detector: YOLOv8n-pose fallback active")
+        except Exception as exc:
+            self._yolo_pose_ok = False
+            self._yolo_pose_model = None
+            print(f"[pose] YOLO pose fallback unavailable ({exc})")
 
     def update_tracking(self, frame_bgr: np.ndarray) -> None:
         """YOLO-only pass: advances ByteTrack state without running MediaPipe.
@@ -339,6 +412,120 @@ class PoseExtractor:
             detection_bbox=detection_bbox,
         )
 
+    def _make_pseudo_world_landmarks(
+        self,
+        landmarks: list[PoseLandmark],
+    ) -> list[PoseLandmark] | None:
+        """Approximate hip-centered world landmarks from 2D YOLO pose output.
+
+        YOLO pose is 2D only. The rest of this pipeline expects MediaPipe-style
+        world landmarks for lateral shift and turn segmentation, so this keeps
+        x/y in normalized image units, centers them at the hip midpoint, and
+        sets z=0. These coordinates are not metric 3D, but they allow the run
+        to produce skeleton-derived metrics instead of failing outright.
+        """
+        left_hip = landmarks[23]
+        right_hip = landmarks[24]
+        if left_hip.visibility < self._min_visibility or right_hip.visibility < self._min_visibility:
+            return None
+        hip_x = (left_hip.x + right_hip.x) / 2.0
+        hip_y = (left_hip.y + right_hip.y) / 2.0
+        return [
+            PoseLandmark(
+                x=lm.x - hip_x,
+                y=lm.y - hip_y,
+                z=0.0,
+                visibility=lm.visibility,
+            )
+            for lm in landmarks
+        ]
+
+    def _run_yolo_pose_fallback(
+        self,
+        frame_bgr: np.ndarray,
+        frame_idx: int,
+        timestamp_s: float,
+        primary_bbox: tuple[int, int, int, int, float] | None,
+    ) -> FramePose | None:
+        """Run YOLOv8 pose and return a FramePose in the MediaPipe contract."""
+        if not self._yolo_pose_ok:
+            self._ensure_yolo_pose_loaded()
+        if self._yolo_pose_model is None:
+            return None
+
+        try:
+            results = self._yolo_pose_model(
+                frame_bgr,
+                conf=0.25,
+                verbose=False,
+                device="cpu",
+            )
+        except Exception as exc:
+            print(f"[pose] YOLO pose error frame {frame_idx}: {exc}")
+            self._yolo_pose_ok = False
+            return None
+
+        frame_h, frame_w = frame_bgr.shape[:2]
+        candidates: list[tuple[float, Any, Any]] = []
+        for result in results:
+            if result.keypoints is None or result.boxes is None:
+                continue
+            boxes_xyxy = result.boxes.xyxy.cpu().numpy()
+            keypoints_xy = result.keypoints.xy.cpu().numpy()
+            keypoints_conf = result.keypoints.conf.cpu().numpy()
+            for idx, box in enumerate(boxes_xyxy):
+                x1, y1, x2, y2 = map(float, box[:4])
+                area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+                score = area
+                if primary_bbox is not None:
+                    px1, py1, px2, py2, _ = primary_bbox
+                    ix1, iy1 = max(x1, px1), max(y1, py1)
+                    ix2, iy2 = min(x2, px2), min(y2, py2)
+                    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+                    union = area + max(0.0, px2 - px1) * max(0.0, py2 - py1) - inter
+                    score = inter / union if union > 0 else 0.0
+                candidates.append((score, box, (keypoints_xy[idx], keypoints_conf[idx])))
+
+        if not candidates:
+            return None
+
+        _, box, keypoints = max(candidates, key=lambda item: item[0])
+        points_xy, points_conf = keypoints
+        landmarks = [
+            PoseLandmark(x=0.0, y=0.0, z=0.0, visibility=0.0)
+            for _ in range(33)
+        ]
+        for coco_idx, mp_idx in _COCO_TO_MEDIAPIPE.items():
+            if coco_idx >= len(points_xy):
+                continue
+            x_px, y_px = points_xy[coco_idx]
+            conf = float(points_conf[coco_idx])
+            landmarks[mp_idx] = PoseLandmark(
+                x=float(x_px) / frame_w,
+                y=float(y_px) / frame_h,
+                z=0.0,
+                visibility=conf,
+            )
+
+        key_vis = [
+            landmarks[i].visibility
+            for i in _CONFIDENCE_JOINTS
+            if i < len(landmarks) and landmarks[i].visibility > 0
+        ]
+        if not key_vis:
+            return None
+
+        x1, y1, x2, y2 = map(int, box[:4])
+        self._frames_since_detection = 0
+        self._update_segment_state(timestamp_s)
+        return self._make_frame_pose(
+            landmarks,
+            self._make_pseudo_world_landmarks(landmarks),
+            frame_idx,
+            timestamp_s,
+            detection_bbox=(x1, y1, x2, y2),
+        )
+
     # ------------------------------------------------------------------
     # Public extraction entry point
     # ------------------------------------------------------------------
@@ -348,6 +535,25 @@ class PoseExtractor:
     ) -> FramePose | None:
         """Extract pose from one BGR frame. Returns None if no person found."""
         if self._landmarker is None:
+            if self._pose_unavailable_reason is not None:
+                if self._cut_detector.is_cut(frame_bgr):
+                    self.scene_cuts_detected += 1
+                    self._detector.reset_bytetrack()
+                    print(f"[tracker] Scene cut #{self.scene_cuts_detected} detected — resetting tracker")
+                primary_bbox = None
+                if self._yolo_ok:
+                    try:
+                        primary_bbox = self._detector.detect_primary(frame_bgr)
+                    except Exception:
+                        pass
+                pose = self._run_yolo_pose_fallback(
+                    frame_bgr, frame_idx, timestamp_s, primary_bbox
+                )
+                if pose is not None:
+                    return pose
+                self._frames_since_detection += 1
+                self._update_segment_state(timestamp_s)
+                return None
             raise RuntimeError("PoseExtractor must be used as a context manager.")
 
         dt = 0.05

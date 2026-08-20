@@ -11,6 +11,7 @@ import numpy as np
 from dataclasses import replace as dc_replace
 
 from technique_analysis.common.contracts.models import (
+    DiagnosticsBundle,
     FrameMetrics,
     FramePose,
     QualityReport,
@@ -19,6 +20,11 @@ from technique_analysis.common.contracts.models import (
     TrackingSegment,
 )
 from technique_analysis.common.coaching.rules import generate_coaching_tips
+from technique_analysis.common.quality import (
+    compute_reliability,
+    compute_stance_visibility_fraction,
+    compute_wedge_likely,
+)
 from technique_analysis.common.datasets.csv_writer import write_metrics_csv
 from technique_analysis.common.datasets.paths import (
     RunPaths,
@@ -35,7 +41,6 @@ from technique_analysis.common.metrics.scoring import (
     compute_turn_quality,
 )
 from technique_analysis.common.pose.extractor import PoseExtractor
-from technique_analysis.common.pose.vision_extractor import VisionPoseExtractor
 from technique_analysis.common.pose.smoother import (
     LandmarkSmoother,
     compute_jitter_score,
@@ -152,8 +157,24 @@ def _build_quality_report(
     viewpoint_warning: str | None,
     resolved_max_fps: float | None,
     resolved_max_dimension: int,
+    turns: list,
+    segments: list[TrackingSegment],
+    video_duration_s: float,
 ) -> QualityReport:
+    stance_fraction = compute_stance_visibility_fraction(all_poses)
+    stance_measurable = stance_fraction >= 0.30
     if not metrics_list:
+        # Empty-metrics fallback: be honest — no frames were analyzed.
+        reliability, counts_for_progress, codes = compute_reliability(
+            low_confidence_fraction=1.0,
+            overall_pose_confidence_mean=0.0,
+            stance_visibility_fraction=stance_fraction,
+            stance_measurable=stance_measurable,
+            wedge_likely=False,
+            turns=turns,
+            segments=segments,
+            video_duration_s=video_duration_s,
+        )
         return QualityReport(
             overall_pose_confidence_mean=0.0,
             overall_pose_confidence_min=0.0,
@@ -163,19 +184,44 @@ def _build_quality_report(
             warnings=[],
             resolved_max_fps=resolved_max_fps,
             resolved_max_dimension=resolved_max_dimension,
+            score_reliability=reliability,
+            score_counts_for_progress=counts_for_progress,
+            quality_warnings=codes,
+            stance_measurable=stance_measurable,
+            stance_visibility_fraction=stance_fraction,
+            wedge_likely=False,
         )
     confs = [m.pose_confidence for m in metrics_list]
     low_conf_thresh = 0.4
     low_frac = sum(1 for c in confs if c < low_conf_thresh) / len(confs)
     valid_poses = [p for p in all_poses if p is not None]
     jitter = compute_jitter_score(valid_poses)
+    overall_conf_mean = float(np.mean(confs))
+
+    wedge_likely = compute_wedge_likely(metrics_list, stance_measurable)
+
+    reliability, counts_for_progress, codes = compute_reliability(
+        low_confidence_fraction=low_frac,
+        overall_pose_confidence_mean=overall_conf_mean,
+        stance_visibility_fraction=stance_fraction,
+        stance_measurable=stance_measurable,
+        wedge_likely=wedge_likely,
+        turns=turns,
+        segments=segments,
+        video_duration_s=video_duration_s,
+    )
+
+    # Legacy free-form warning strings remain for backward compatibility with
+    # any reader still parsing `quality.warnings`. The structured codes go on
+    # `quality.quality_warnings` per the Improvements V2 contract.
     warnings: list[str] = []
     if viewpoint_warning:
         warnings.append(viewpoint_warning)
     if low_frac > 0.5:
         warnings.append(f"High low-confidence frame fraction: {low_frac:.0%}")
+
     return QualityReport(
-        overall_pose_confidence_mean=float(np.mean(confs)),
+        overall_pose_confidence_mean=overall_conf_mean,
         overall_pose_confidence_min=float(np.min(confs)),
         low_confidence_fraction=low_frac,
         viewpoint_warning=viewpoint_warning,
@@ -183,6 +229,12 @@ def _build_quality_report(
         warnings=warnings,
         resolved_max_fps=resolved_max_fps,
         resolved_max_dimension=resolved_max_dimension,
+        score_reliability=reliability,
+        score_counts_for_progress=counts_for_progress,
+        quality_warnings=codes,
+        stance_measurable=stance_measurable,
+        stance_visibility_fraction=stance_fraction,
+        wedge_likely=wedge_likely,
     )
 
 
@@ -280,12 +332,7 @@ class TechniqueAnalysisRunner:
         )
         next_analysis_ts = 0.0
 
-        ExtractorClass = (
-            VisionPoseExtractor
-            if self.config.pose_engine == "vision"
-            else PoseExtractor
-        )
-        with ExtractorClass(min_visibility=self.config.min_visibility) as extractor:
+        with PoseExtractor(min_visibility=self.config.min_visibility) as extractor:
             for frame_idx, timestamp_s, frame in iter_frames(
                 video_path,
                 max_fps=None,               # read EVERY frame for ByteTrack
@@ -347,6 +394,9 @@ class TechniqueAnalysisRunner:
         quality = _build_quality_report(
             metrics_list, all_poses, viewpoint_warning,
             resolved_max_fps, resolved_max_dimension,
+            turns=turns,
+            segments=segments,
+            video_duration_s=metadata.duration_s,
         )
         if scene_cuts > 0:
             quality.warnings.append(
@@ -386,6 +436,10 @@ class TechniqueAnalysisRunner:
                 quality.warnings.append(f"Overlay rendering failed: {exc}")
 
         # 10. Write summary JSON
+        # diagnostics is intentionally default-initialized in this pass;
+        # Phase 1 / 3 / 5 will populate timestamp / nyquist / event-mapping
+        # fields as they land. See common/contracts/models.DiagnosticsBundle.
+        diagnostics = DiagnosticsBundle()
         summary = TechniqueRunSummary(
             run_id=run_paths.run_id,
             created_at=datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -403,6 +457,7 @@ class TechniqueAnalysisRunner:
             ],
             codec_used=codec,
             segments=segments,
+            diagnostics=diagnostics,
         )
         run_paths.summary_json_path.write_text(
             json.dumps(summary.as_dict(), indent=2), encoding="utf-8"
